@@ -1,0 +1,37 @@
+name: Set up pr-studio
+description: Node packages, Chrome, and the voice environment (Kokoro, Whisper, ffmpeg), cached between runs. Run after actions/checkout.
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v5
+      with:
+        node-version: 24
+        cache: npm
+
+    - id: python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.12'
+
+    # The voice environment (venv, Kokoro, ffmpeg), the Whisper model and Chrome: about 1 GB that rarely changes.
+    - uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/pr-studio
+          ~/.cache/huggingface
+          ~/.cache/ms-playwright
+        # A partial match still restores the models and the venv; doctor then adds only what changed.
+        key: pr-studio-v1-${{ runner.os }}-py${{ steps.python.outputs.python-version }}-${{ hashFiles('package-lock.json', 'voice/requirements.txt') }}
+        restore-keys: pr-studio-v1-${{ runner.os }}-py${{ steps.python.outputs.python-version }}-
+
+    - run: npm ci
+      shell: bash
+
+    - name: Chrome and the system libraries it needs
+      run: npx playwright-core install --with-deps chromium
+      shell: bash
+
+    - name: Voice environment, models and checks
+      run: node cli/prs.mjs doctor
+      shell: bash

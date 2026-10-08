@@ -1,0 +1,145 @@
+{
+	"pr": {
+		"repo": "microsoft/vscode",
+		"number": 339081,
+		"headSha": "ddb26d5730665640808d5097851a670a929ef6bb"
+	},
+	"length": {
+		"seconds": [
+			40,
+			55
+		],
+		"words": [
+			90,
+			125
+		]
+	},
+	"pronounce": {
+		"339081": "three three nine oh eight one",
+		"app/copilot-swe-agent": "app copilot S W E agent",
+		"Parcel": "parcel",
+		"ParcelWatcher": "Parcel watcher",
+		"mcp/*.mjs": "M C P star dot M J S",
+		".custom/agents/*.md": "dot custom agents star dot M D",
+		"deduplicateRequests": "deduplicate requests"
+	},
+	"beats": [
+		{
+			"id": "title",
+			"need": "title",
+			"say": "Pull request {{facts.number}}, by {{facts.authorLogin}}: keep broad Parcel workspace watches while deduplicating. {{facts.additions}} lines, {{facts.changedFiles}} files. Merged.",
+			"cues": {
+				"author": "by",
+				"stats": "{{facts.additions}}",
+				"state": "{{facts.changedFiles}}"
+			},
+			"claims": [
+				{
+					"text": "The PR keeps broad Parcel workspace watches during request deduplication.",
+					"evidence": [
+						{
+							"file": "src/vs/platform/files/node/watcher/parcel/parcelWatcher.ts",
+							"anchor": "const broad = !request.includes?.length ? request : previous;"
+						}
+					]
+				}
+			]
+		},
+		{
+			"id": "risk",
+			"need": "concept",
+			"say": "The bug was an ordering trap. A later narrow request for the same workspace could replace an unfiltered watcher. Changes outside that include pattern could be missed.",
+			"cues": {
+				"later": "later narrow request",
+				"replace": "replace",
+				"missed": "Changes outside"
+			},
+			"claims": [
+				{
+					"text": "A later narrow request for the same root could replace an unfiltered recursive workspace watcher.",
+					"evidence": [
+						{
+							"file": "src/vs/platform/files/node/watcher/parcel/parcelWatcher.ts",
+							"anchor": "requestsForCorrelation.set(path, request);"
+						}
+					]
+				}
+			]
+		},
+		{
+			"id": "merge",
+			"need": "rules",
+			"say": "The rule merges only uncorrelated requests. If either request is broad, keep broad coverage. If both are narrow, append includes. Keep only shared exclusions.",
+			"cues": {
+				"uncorrelated": "uncorrelated",
+				"broad": "broad coverage",
+				"includes": "append",
+				"exclusions": "Exclusions"
+			},
+			"claims": [
+				{
+					"text": "The merge rule only applies when a previous request exists and the current request has no correlation ID.",
+					"evidence": [
+						{
+							"file": "src/vs/platform/files/node/watcher/parcel/parcelWatcher.ts",
+							"anchor": "if (previous && request.correlationId === undefined)"
+						}
+					]
+				},
+				{
+					"text": "Includes are combined only when both requests are narrow.",
+					"evidence": [
+						{
+							"file": "src/vs/platform/files/node/watcher/parcel/parcelWatcher.ts",
+							"anchor": "const includes = !previous.includes?.length || !request.includes?.length ? undefined : [...previous.includes, ...request.includes];"
+						}
+					]
+				},
+				{
+					"text": "Excludes are retained only when both requests include the same exclude.",
+					"evidence": [
+						{
+							"file": "src/vs/platform/files/node/watcher/parcel/parcelWatcher.ts",
+							"anchor": "const excludes = previous.excludes.filter(exclude => request.excludes.includes(exclude));"
+						}
+					]
+				}
+			]
+		},
+		{
+			"id": "status",
+			"need": "status",
+			"say": "Coverage is in Parcel watcher tests for both request orders and overlapping includes. They cover shared or absent excludes and different correlation IDs staying separate. Start review in the watcher and request deduplication cases.",
+			"cues": {
+				"tests": "Parcel watcher tests",
+				"orders": "both request orders",
+				"correlation": "correlation IDs",
+				"review": "Start review"
+			},
+			"claims": [
+				{
+					"text": "Tests cover broad/narrow ordering, include merging, exclude overlap, missing excludes, and different correlation IDs.",
+					"evidence": [
+						{
+							"file": "src/vs/platform/files/test/node/parcelWatcher.test.ts",
+							"anchor": "uncorrelated same-root requests preserve a broad watcher in either order"
+						},
+						{
+							"file": "src/vs/platform/files/test/node/parcelWatcher.test.ts",
+							"anchor": "requests with different correlation IDs remain separate"
+						}
+					]
+				},
+				{
+					"text": "The test helper exposes deduplicateRequests.",
+					"evidence": [
+						{
+							"file": "src/vs/platform/files/test/node/parcelWatcher.test.ts",
+							"anchor": "async deduplicateRequests(requests: IRecursiveWatchRequest[]): Promise<IRecursiveWatchRequest[]>"
+						}
+					]
+				}
+			]
+		}
+	]
+}

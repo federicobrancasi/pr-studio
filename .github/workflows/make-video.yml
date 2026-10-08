@@ -1,0 +1,59 @@
+name: Make a PR video
+
+# Copilot makes the video of one pull request on GitHub's machine, with nobody watching
+# (.claude/skills/pr-video/guides/unattended.md). Start it from the Actions tab, or:
+#   gh workflow run make-video.yml -f pr=339563
+# The video, its captions, a contact sheet, the agent's notes and the session transcript are in the run's artifacts.
+on:
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: 'The pull request: a URL, owner/repo#123, or a microsoft/vscode PR number'
+        required: true
+      model:
+        description: 'The Copilot model'
+        default: claude-sonnet-5.5
+      effort:
+        description: 'Reasoning effort (low, medium, high, xhigh, max)'
+        default: high
+
+# copilot-requests: Copilot CLI signs in with this run's own token. In a personally owned repository the usage is
+# billed to the owner's Copilot plan; in an organization's, to the organization.
+permissions:
+  contents: read
+  copilot-requests: write
+
+jobs:
+  video:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./.github/actions/setup
+
+      - name: Install Copilot CLI
+        run: npm install -g @github/copilot
+
+      - name: Make the video
+        env:
+          PR: ${{ inputs.pr }}
+          MODEL: ${{ inputs.model }}
+          EFFORT: ${{ inputs.effort }}
+          GITHUB_TOKEN: ${{ github.token }}
+          CI: 'true'
+          PRS_DELIVER: out
+        run: |
+          mkdir -p out
+          echo "model: $MODEL, reasoning effort: $EFFORT"
+          copilot -p "$(node cli/prs.mjs prompt "$PR")" --model "$MODEL" --reasoning-effort "$EFFORT" --allow-all-tools --deny-tool 'shell(git push)' --share out/session.md
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: video
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            out/
+            videos/*/notes.md

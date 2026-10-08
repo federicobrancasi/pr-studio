@@ -1,0 +1,280 @@
+{
+	"pr": {
+		"repo": "microsoft/vscode",
+		"number": 325804,
+		"headSha": "5627be470cc2169d241ec31a0abe43285ed4abb9"
+	},
+	"length": {
+		"seconds": [
+			85,
+			100
+		],
+		"words": [
+			195,
+			230
+		]
+	},
+	"pronounce": {
+		"401": "four oh one",
+		"403": "four oh three",
+		"325804": "three two five eight oh four",
+		"RFC 9728": "R F C ninety-seven twenty-eight",
+		"mcumming": "M Cumming",
+		"product.json": "product dot json",
+		"getAuthorizationHeaders": "get authorization headers",
+		"fetchManifestWithAccess": "fetch manifest with access",
+		"isSameSecureOrigin": "is same secure origin",
+		"RequiresSignIn": "Requires Sign In",
+		"AccessDenied": "Access Denied",
+		"IPC": "I P C",
+		"Entra ID": "Entra I D",
+		"README": "read me"
+	},
+	"beats": [
+		{
+			"id": "hook",
+			"need": "title",
+			"say": "Pull request {{facts.number}}, by {{facts.authorLogin}}: authenticating to a locked Private Marketplace. {{facts.additions}} lines added across {{facts.changedFiles}} files. Still open for review.",
+			"cues": {
+				"title": "Pull request",
+				"author": "by",
+				"stats": "lines added",
+				"state": "Still open"
+			},
+			"claims": [
+				{
+					"text": "PR number, author, additions, changed files, state are as GitHub reports",
+					"evidence": [
+						{
+							"fact": "facts.number"
+						},
+						{
+							"fact": "facts.authorLogin"
+						},
+						{
+							"fact": "facts.additions"
+						},
+						{
+							"fact": "facts.changedFiles"
+						},
+						{
+							"fact": "facts.state"
+						}
+					]
+				}
+			]
+		},
+		{
+			"id": "problem",
+			"need": "concept",
+			"say": "A Private Marketplace can demand a token minted for the marketplace itself. A sign-in token only says who you are. And the marketplace's identity can't live in product.json, because every company registers its own.",
+			"cues": {
+				"gate": "demand a token",
+				"token": "sign-in token",
+				"audience": "who you are",
+				"product": "product.json",
+				"companies": "every company"
+			},
+			"claims": [
+				{
+					"text": "a Private Marketplace with authentication enforced refuses its service index unless it gets a token minted for the marketplace itself; the sign-in token identifies the user but its audience is not the marketplace",
+					"evidence": [
+						{
+							"pr_body": "## Why"
+						}
+					]
+				},
+				{
+					"text": "the marketplace's resource identity can't be shipped in product.json because a self-hosted deployment has its own app registration",
+					"evidence": [
+						{
+							"pr_body": "## Why"
+						}
+					]
+				}
+			]
+		},
+		{
+			"id": "negotiate",
+			"need": "exchange",
+			"say": "So VS Code asks at runtime, using RFC 9728. One: request the index. Two: on a 401 or 403, read the marketplace's well-known metadata for its authorization server and scopes. Three: get a token scoped to that resource. Four: retry. If step one works, nothing else runs.",
+			"cues": {
+				"rfc": "RFC 9728",
+				"step1": "One",
+				"step2": "Two",
+				"step3": "Three",
+				"step4": "Four",
+				"skip": "If step one works"
+			},
+			"claims": [
+				{
+					"text": "the service index is first read with the bearer the account already carries",
+					"evidence": [
+						{
+							"file": "src/vs/workbench/services/extensionManagement/electron-browser/extensionGalleryManifestService.ts",
+							"anchor": "fetchManifestWithAccess"
+						}
+					]
+				},
+				{
+					"text": "a 401 or 403 from the service index is treated as 'authentication required' (MarketplaceAuthRequiredError)",
+					"evidence": [
+						{
+							"file": "src/vs/workbench/services/extensionManagement/electron-browser/extensionGalleryManifestService.ts",
+							"anchor": "statusCode === 401 || statusCode === 403"
+						}
+					]
+				},
+				{
+					"text": "discoverProtectedResource reads the marketplace's protected resource metadata and returns its first authorization server and its supported scopes",
+					"evidence": [
+						{
+							"file": "src/vs/workbench/services/extensionManagement/electron-browser/extensionGalleryManifestService.ts",
+							"anchor": "discoverProtectedResource"
+						}
+					]
+				},
+				{
+					"text": "a resource-scoped token is requested from the account service via getAccount(protectedResource) and the index is read again with it",
+					"evidence": [
+						{
+							"file": "src/vs/workbench/services/extensionManagement/electron-browser/extensionGalleryManifestService.ts",
+							"anchor": "getAccount(protectedResource)"
+						}
+					]
+				},
+				{
+					"text": "if the first request succeeds no discovery or negotiation happens",
+					"evidence": [
+						{
+							"file": "src/vs/workbench/services/extensionManagement/electron-browser/extensionGalleryManifestService.ts",
+							"anchor": "fetchManifestWithAccess"
+						}
+					]
+				}
+			]
+		},
+		{
+			"id": "safety",
+			"need": "rules",
+			"say": "Then the careful part: where the token may go. getAuthorizationHeaders sends it only over https, to exactly the service index's origin. Public-marketplace downloads stay anonymous, and a shared parent domain doesn't count.",
+			"cues": {
+				"rule": "getAuthorizationHeaders",
+				"https": "only over https",
+				"origin": "service index's origin",
+				"anonymous": "stay anonymous",
+				"parent": "shared parent domain"
+			},
+			"claims": [
+				{
+					"text": "the bearer is attached only to https requests whose authority equals the service index's authority, and fails closed otherwise",
+					"evidence": [
+						{
+							"file": "src/vs/platform/extensionManagement/common/extensionGalleryManifestService.ts",
+							"anchor": "isSameSecureOrigin"
+						}
+					]
+				},
+				{
+					"text": "upstreamed extensions are fetched from the public Microsoft marketplace and must not receive the private marketplace's token",
+					"evidence": [
+						{
+							"file": "src/vs/platform/extensionManagement/common/extensionGalleryManifestService.ts",
+							"anchor": "getAuthorizationHeaders"
+						}
+					]
+				},
+				{
+					"text": "parent-domain matching is deliberately not used because a marketplace can share its parent domain with unrelated tenants",
+					"evidence": [
+						{
+							"file": "src/vs/platform/extensionManagement/common/extensionGalleryManifestService.ts",
+							"anchor": "isSameSecureOrigin"
+						}
+					]
+				}
+			]
+		},
+		{
+			"id": "reach",
+			"need": "architecture",
+			"say": "The same bearer covers search, downloads, and extension resources like icons and README. It also travels over IPC to the shared process and, when connected, the remote server. If access is still refused, users now get RequiresSignIn, not a dead-end AccessDenied.",
+			"cues": {
+				"covers": "The same bearer",
+				"downloads": "downloads",
+				"resources": "extension resources",
+				"ipc": "over IPC",
+				"remote": "remote server",
+				"signin": "RequiresSignIn"
+			},
+			"claims": [
+				{
+					"text": "the bearer is attached to search (extensionquery), control manifest, asset/VSIX downloads and extension resource requests (icons, README, CHANGELOG)",
+					"evidence": [
+						{
+							"pr_body": "## What it does"
+						}
+					]
+				},
+				{
+					"text": "the token and the index origin are pushed over the extensionGalleryManifest channel to the shared process and, when there is one, the remote server",
+					"evidence": [
+						{
+							"file": "src/vs/platform/extensionManagement/common/extensionGalleryManifestServiceIpc.ts",
+							"anchor": "setExtensionGalleryManifest"
+						}
+					]
+				},
+				{
+					"text": "a marketplace that still requires authentication after negotiation now reports RequiresSignIn instead of AccessDenied",
+					"evidence": [
+						{
+							"file": "src/vs/workbench/services/extensionManagement/electron-browser/extensionGalleryManifestService.ts",
+							"anchor": "RequiresSignIn"
+						}
+					]
+				}
+			]
+		},
+		{
+			"id": "scope",
+			"need": "status",
+			"say": "Entra ID only; GitHub follows separately. Tests are included, and a manual run on a real gated marketplace is still pending. Read fetchManifestWithAccess first, then isSameSecureOrigin.",
+			"cues": {
+				"entra": "Entra ID only",
+				"github": "GitHub follows",
+				"tests": "Tests are included",
+				"manual": "manual run",
+				"read1": "fetchManifestWithAccess",
+				"read2": "isSameSecureOrigin"
+			},
+			"claims": [
+				{
+					"text": "scope is Microsoft Entra ID only; the GitHub path is deferred to a follow-up PR",
+					"evidence": [
+						{
+							"pr_body": "Scope"
+						}
+					]
+				},
+				{
+					"text": "tests added including a new extensionGalleryManifestServiceIpc.test.ts",
+					"evidence": [
+						{
+							"file": "src/vs/platform/extensionManagement/test/common/extensionGalleryManifestServiceIpc.test.ts",
+							"status": "added"
+						}
+					]
+				},
+				{
+					"text": "a manual pass against a Private Marketplace with authentication enforced is still pending, per the author",
+					"evidence": [
+						{
+							"pr_body": "## Testing"
+						}
+					]
+				}
+			]
+		}
+	]
+}

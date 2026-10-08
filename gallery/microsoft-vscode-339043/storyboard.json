@@ -1,0 +1,184 @@
+{
+	"pr": {
+		"repo": "microsoft/vscode",
+		"number": 339043,
+		"headSha": "061d9ed071af455299942cf16a3c238e29ce5f9d"
+	},
+	"length": {
+		"seconds": [
+			60,
+			80
+		],
+		"words": [
+			135,
+			185
+		]
+	},
+	"pronounce": {
+		"roblourens": "Rob Laurens",
+		"ahp_resource_uri": "A H P resource U R I",
+		"CloudSandboxApiService": "Cloud Sandbox A P I Service"
+	},
+	"beats": [
+		{
+			"id": "title",
+			"need": "title",
+			"say": "Pull request {{facts.number}}, by {{facts.authorLogin}}: hide stalled queued sandbox sessions. {{facts.additions}} lines added across {{facts.changedFiles}} files, and it is merged.",
+			"cues": {
+				"author": "by",
+				"stats": "{{facts.additions}}",
+				"state": "merged"
+			},
+			"claims": [
+				{
+					"text": "The PR is merged.",
+					"evidence": [
+						{
+							"fact": "state"
+						}
+					]
+				}
+			]
+		},
+		{
+			"id": "problem",
+			"need": "concept",
+			"say": "The PR targets core sandbox session lists. Some tasks look like real sessions, but the author says they are apparently never-started sandboxes. The change uses metadata already fetched during discovery, not a new connection or history read.",
+			"cues": {
+				"lists": "core sandbox session lists",
+				"neverStarted": "apparently never-started sandboxes",
+				"metadata": "metadata already fetched during discovery"
+			},
+			"claims": [
+				{
+					"text": "The PR hides apparently never-started sandbox tasks from core sandbox session lists using metadata already fetched during discovery.",
+					"evidence": [
+						{
+							"body": "Hide apparently never-started sandbox tasks from the core sandbox session lists using metadata already fetched during discovery."
+						}
+					]
+				},
+				{
+					"text": "It does not connect to or wake sandboxes or read histories.",
+					"evidence": [
+						{
+							"body": "This does not connect to or wake sandboxes, read their histories"
+						}
+					]
+				}
+			]
+		},
+		{
+			"id": "rule",
+			"need": "rules",
+			"say": "The filter is narrow. It needs the exact title New remote session, a queued task, exactly one queued session, no ahp_resource_uri, matching created and updated timestamps, and at least one hour of age.",
+			"cues": {
+				"title": "exact title",
+				"queued": "queued task",
+				"resource": "no ahp_resource_uri",
+				"hour": "one hour"
+			},
+			"claims": [
+				{
+					"text": "The implementation requires the title New remote session, task state queued, exactly one session, session state queued, no AHP resource, matching timestamps, and a finite created time.",
+					"evidence": [
+						{
+							"file": "src/vs/workbench/contrib/chat/browser/remoteAgentHost/cloudSandboxApiService.ts",
+							"anchor": "function getUnstartedSessionCreatedAt"
+						},
+						{
+							"file": "src/vs/workbench/contrib/chat/browser/remoteAgentHost/cloudSandboxApiService.ts",
+							"anchor": "STALLED_SESSION_GRACE_MS"
+						}
+					]
+				}
+			]
+		},
+		{
+			"id": "reconcile",
+			"need": "flow",
+			"say": "Discovery caches the candidate creation time, reevaluates it on incremental scans, reports filtered task IDs as removals, and can restore the row when a later update says the session started.",
+			"cues": {
+				"cache": "caches",
+				"incremental": "incremental scans",
+				"removals": "removals",
+				"restore": "restore the row"
+			},
+			"claims": [
+				{
+					"text": "Cached candidates are reevaluated during incremental discovery, filtered task IDs are reported as removals, and later discovery can restore started sessions.",
+					"evidence": [
+						{
+							"body": "Cache the candidate creation time and reevaluate it on incremental scans even outside the update window, without additional detail requests."
+						},
+						{
+							"body": "Report filtered task IDs as explicit removals for incremental/partial reconciliation."
+						},
+						{
+							"body": "A later discovery update can restore a session that starts successfully."
+						}
+					]
+				},
+				{
+					"text": "The tests cover cached incremental expiration and recovery.",
+					"evidence": [
+						{
+							"file": "src/vs/workbench/contrib/chat/test/browser/remoteAgentHost/cloudSandboxApiService.test.ts",
+							"anchor": "reevaluates cached candidates outside the incremental window"
+						},
+						{
+							"file": "src/vs/workbench/contrib/chat/test/browser/remoteAgentHost/cloudSandboxApiService.test.ts",
+							"anchor": "restores a hidden task when discovery reports that its session started"
+						}
+					]
+				}
+			]
+		},
+		{
+			"id": "status",
+			"need": "status",
+			"say": "Status: merged, approved, and tested with compile-client, the CloudSandbox tests, eslint, and diff check. Start review in CloudSandboxApiService, then the stalled discovery tests. No live UI verification was run.",
+			"cues": {
+				"merged": "merged",
+				"tests": "CloudSandbox tests",
+				"start": "Start review",
+				"ui": "No live UI verification"
+			},
+			"claims": [
+				{
+					"text": "The PR was approved.",
+					"evidence": [
+						{
+							"fact": "reviewDecision"
+						}
+					]
+				},
+				{
+					"text": "Validation passed compile-client, the CloudSandbox tests, eslint, and git diff --check.",
+					"evidence": [
+						{
+							"body": "npm run compile-client — passed"
+						},
+						{
+							"body": "./scripts/test.sh --run src/vs/workbench/contrib/chat/test/browser/remoteAgentHost/cloudSandboxApiService.test.ts --run src/vs/sessions/contrib/providers/remoteAgentHost/test/browser/cloudSandboxAgentHostContribution.test.ts --grep \"CloudSandbox\" — passed, 127 tests."
+						},
+						{
+							"body": "npm run eslint -- src/vs/workbench/contrib/chat/browser/remoteAgentHost/cloudSandboxApiService.ts src/vs/workbench/contrib/chat/test/browser/remoteAgentHost/cloudSandboxApiService.test.ts src/vs/sessions/contrib/providers/remoteAgentHost/test/browser/cloudSandboxAgentHostContribution.test.ts — passed."
+						},
+						{
+							"body": "git diff --check — passed before committing"
+						}
+					]
+				},
+				{
+					"text": "No live UI verification was run.",
+					"evidence": [
+						{
+							"body": "No live UI verification was run."
+						}
+					]
+				}
+			]
+		}
+	]
+}

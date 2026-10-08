@@ -1,0 +1,28 @@
+{
+	"seed": "microsoft-vscode-339081:1",
+	"motion": "slides",
+	"beats": {
+		"title": {
+			"need": "title",
+			"treatment": "title.frame",
+			"why": "used 1 video ago; fewest alternatives"
+		},
+		"risk": {
+			"need": "concept",
+			"treatment": "concept.pillars",
+			"why": "not used in recent videos"
+		},
+		"merge": {
+			"need": "rules",
+			"treatment": "rules.sieve",
+			"why": "not used in recent videos"
+		},
+		"status": {
+			"need": "status",
+			"treatment": "status.board",
+			"why": "not used in recent videos"
+		}
+	},
+	"overrides": {},
+	"pickedAt": "2026-10-01T18:58:44.963Z"
+}

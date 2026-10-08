@@ -1,0 +1,221 @@
+{
+	"pr": {
+		"repo": "microsoft/vscode",
+		"number": 338981,
+		"headSha": "9ff46e49ccc0f6a092076371c5fca900c4a9182b"
+	},
+	"length": {
+		"seconds": [
+			60,
+			80
+		],
+		"words": [
+			135,
+			185
+		]
+	},
+	"pronounce": {
+		"SDK": "S D K",
+		"HTTP": "H T T P",
+		"HTTPS": "H T T P S",
+		"URLs": "U R Ls",
+		"macOS": "Mac O S",
+		"CSS": "C S S",
+		"WebKit": "Web Kit",
+		"CopilotAgentSession": "Copilot Agent Session",
+		"AgentHostSandboxNotification": "Agent Host Sandbox Notification",
+		"ChatInputNotificationWidget": "Chat Input Notification Widget"
+	},
+	"beats": [
+		{
+			"id": "title",
+			"need": "title",
+			"say": "PR {{facts.number}}: warn when sandbox dependencies are missing on Windows. {{facts.additions}} lines across {{facts.changedFiles}} files, merged.",
+			"cues": {
+				"author": "PR",
+				"stats": "{{facts.additions}}",
+				"state": "merged"
+			},
+			"claims": [
+				{
+					"text": "The PR warns when sandbox dependencies are missing on Windows.",
+					"evidence": [
+						{
+							"file": "src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/agentHostSandboxNotification.ts",
+							"anchor": "agentHost.sandboxUnsupported"
+						}
+					]
+				}
+			]
+		},
+		{
+			"id": "platforms",
+			"need": "compare",
+			"say": "Before, sandbox diagnostics were skipped outside Linux. Now the session still turns them off for custom terminals but otherwise publishes SDK sandbox config on Windows and Mac OS.",
+			"cues": {
+				"before": "skipped",
+				"custom": "custom terminals",
+				"now": "Windows and Mac OS"
+			},
+			"claims": [
+				{
+					"text": "CopilotAgentSession now updates sandbox diagnostics without checking for Linux.",
+					"evidence": [
+						{
+							"file": "src/vs/platform/agentHost/node/copilot/copilotAgentSession.ts",
+							"anchor": "await this._sandboxDiagnostics.update(this._isCustomTerminalToolEnabled()"
+						}
+					]
+				},
+				{
+					"text": "The new condition disables diagnostics only for the custom terminal tool path.",
+					"evidence": [
+						{
+							"file": "src/vs/platform/agentHost/node/copilot/copilotAgentSession.ts",
+							"anchor": "this._isCustomTerminalToolEnabled() ? { enabled: false }"
+						}
+					]
+				},
+				{
+					"text": "Tests now expect diagnostics on darwin and win32.",
+					"evidence": [
+						{
+							"file": "src/vs/platform/agentHost/test/node/copilotAgentSession.test.ts",
+							"anchor": "queries and publishes SDK sandbox diagnostics on ${platform}"
+						}
+					]
+				}
+			]
+		},
+		{
+			"id": "message",
+			"need": "flow",
+			"say": "The warning description becomes untrusted markdown. SDK reasons are split into lines; the shared link detector turns only web URLs into links, while SDK text stays escaped.",
+			"cues": {
+				"markdown": "untrusted markdown",
+				"lines": "split into lines",
+				"links": "web URLs into links",
+				"escaped": "escaped"
+			},
+			"claims": [
+				{
+					"text": "AgentHostSandboxNotification builds the description with MarkdownString.",
+					"evidence": [
+						{
+							"file": "src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/agentHostSandboxNotification.ts",
+							"anchor": "const description = new MarkdownString()"
+						}
+					]
+				},
+				{
+					"text": "It uses LinkComputer to compute links and only accepts http or https URLs.",
+					"evidence": [
+						{
+							"file": "src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/agentHostSandboxNotification.ts",
+							"anchor": "LinkComputer.computeLinks"
+						},
+						{
+							"file": "src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/agentHostSandboxNotification.ts",
+							"anchor": "^https?:\\/\\/"
+						}
+					]
+				},
+				{
+					"text": "Non-link text is appended as text around detected links.",
+					"evidence": [
+						{
+							"file": "src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/agentHostSandboxNotification.ts",
+							"anchor": "description.appendText(line.slice(offset"
+						}
+					]
+				}
+			]
+		},
+		{
+			"id": "interaction",
+			"need": "ui",
+			"say": "The chat input warning also becomes usable: title and description text are selectable, support links open by mouse or Enter with commands disabled and accessibility help explains both actions.",
+			"cues": {
+				"selection": "selectable",
+				"open": "mouse or Enter",
+				"help": "accessibility help"
+			},
+			"claims": [
+				{
+					"text": "The notification title and description CSS allow user text selection, including a WebKit property.",
+					"evidence": [
+						{
+							"file": "src/vs/workbench/contrib/chat/browser/widget/input/media/chatInputNotificationWidget.css",
+							"anchor": "user-select: text"
+						}
+					]
+				},
+				{
+					"text": "A test verifies mouse and keyboard opening and allowCommands false.",
+					"evidence": [
+						{
+							"file": "src/vs/workbench/contrib/chat/test/browser/widget/input/chatInputNotificationWidget.test.ts",
+							"anchor": "allowCommands: false"
+						}
+					]
+				},
+				{
+					"text": "Accessibility help mentions selecting, copying, tabbing to support links, and Enter.",
+					"evidence": [
+						{
+							"file": "src/vs/workbench/contrib/chat/browser/actions/chatAccessibilityHelp.ts",
+							"anchor": "You can select and copy the warning text"
+						}
+					]
+				}
+			]
+		},
+		{
+			"id": "status",
+			"need": "status",
+			"say": "The PR is merged and approved. Targeted tests report 54 passing with zero-error transpile and type check, diff check, and pre commit. Full suite and manual end-to-end UI validation were not rerun. Start with the session file plus sandbox notification file and notification widget CSS.",
+			"cues": {
+				"merged": "merged and approved",
+				"tests": "54 passing",
+				"notRerun": "not rerun",
+				"start": "Start with"
+			},
+			"claims": [
+				{
+					"text": "Tests cover platform diagnostics, support URL links, and selectable notification text.",
+					"evidence": [
+						{
+							"file": "src/vs/platform/agentHost/test/node/copilotAgentSession.test.ts",
+							"anchor": "queries and publishes SDK sandbox diagnostics on ${platform}"
+						},
+						{
+							"file": "src/vs/workbench/contrib/chat/test/browser/agentSessions/agentHostSandboxNotification.test.ts",
+							"anchor": "links support URLs without interpreting diagnostic markup or including trailing text"
+						},
+						{
+							"file": "src/vs/workbench/contrib/chat/test/browser/widget/input/chatInputNotificationWidget.test.ts",
+							"anchor": "escaped diagnostic text is selectable and support links open with mouse and keyboard"
+						}
+					]
+				},
+				{
+					"text": "CopilotAgentSession, AgentHostSandboxNotification, and ChatInputNotificationWidget are changed by the PR.",
+					"evidence": [
+						{
+							"file": "src/vs/platform/agentHost/node/copilot/copilotAgentSession.ts",
+							"anchor": "export class CopilotAgentSession"
+						},
+						{
+							"file": "src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/agentHostSandboxNotification.ts",
+							"anchor": "export class AgentHostSandboxNotification"
+						},
+						{
+							"file": "src/vs/workbench/contrib/chat/test/browser/widget/input/chatInputNotificationWidget.test.ts",
+							"anchor": "ChatInputNotificationWidget"
+						}
+					]
+				}
+			]
+		}
+	]
+}

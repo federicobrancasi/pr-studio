@@ -1,0 +1,51 @@
+name: Copilot Setup Steps
+
+# The Copilot cloud agent runs this job before every session (for example one started from Slack with @GitHub),
+# so it can make a video right away: node packages, Chrome, the voice environment, Kokoro and Whisper.
+# Run it by hand (Actions tab, or gh workflow run copilot-setup-steps.yml) to also make the smoke video and see
+# how long each step takes on the cloud machine; the video, captions and a contact sheet are in the run's artifacts.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+      - .github/actions/setup/action.yml
+
+jobs:
+  # The job must be called copilot-setup-steps, or the agent ignores it.
+  copilot-setup-steps:
+    runs-on: ubuntu-latest
+    # Also the agent session's time limit: 59 is the most GitHub allows, and a changelog run needs it.
+    timeout-minutes: 59
+    permissions:
+      contents: read
+      pull-requests: read # to read the session's request (prs prefetch)
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./.github/actions/setup
+
+      # Outside the agent's firewall: cache the PRs named in the request, in case api.github.com is not allowed.
+      - name: Prefetch the pull requests in the request (agent sessions only)
+        if: github.event_name != 'workflow_dispatch' && github.event_name != 'push'
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node cli/prs.mjs prefetch
+
+      - name: Smoke video (manual runs only, never in an agent session)
+        if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+        run: node cli/prs.mjs smoke
+
+      - uses: actions/upload-artifact@v4
+        if: always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'push')
+        with:
+          name: smoke
+          if-no-files-found: ignore
+          retention-days: 7
+          path: |
+            videos/_smoke/build/_smoke.mp4
+            videos/_smoke/build/_smoke.srt
+            videos/_smoke/build/contact.png
+            videos/_smoke/build/smoke.json
+            videos/_smoke/build/lint.json

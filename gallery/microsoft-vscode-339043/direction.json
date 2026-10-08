@@ -1,0 +1,33 @@
+{
+	"seed": "microsoft-vscode-339043:3",
+	"motion": "slides",
+	"beats": {
+		"title": {
+			"need": "title",
+			"treatment": "title.frame",
+			"why": "used 1 video ago; fewest alternatives"
+		},
+		"problem": {
+			"need": "concept",
+			"treatment": "concept.mismatch",
+			"why": "used 3 videos ago; fewest alternatives"
+		},
+		"rule": {
+			"need": "rules",
+			"treatment": "rules.stamps",
+			"why": "not used in recent videos"
+		},
+		"reconcile": {
+			"need": "flow",
+			"treatment": "flow.numbered",
+			"why": "not used in recent videos"
+		},
+		"status": {
+			"need": "status",
+			"treatment": "status.checklist",
+			"why": "used 3 videos ago; fewest alternatives"
+		}
+	},
+	"overrides": {},
+	"pickedAt": "2026-10-01T19:17:34.814Z"
+}

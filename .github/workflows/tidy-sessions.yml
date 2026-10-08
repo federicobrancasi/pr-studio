@@ -1,0 +1,52 @@
+name: Tidy video sessions
+
+# Every Copilot cloud session (a request from Slack) works on its own copilot/* branch and opens a draft pull
+# request. Once a day:
+# 1. the videos those sessions made go into gallery/history.jsonl on main, so the next sessions pick different
+#    diagrams (prs history --collect);
+# 2. drafts that only touch deliver/ (videos committed when Slack refused the file) or gallery/ (that history) are
+#    closed, with their branches, two days after their last update. Any other pull request is left alone.
+on:
+  schedule:
+    - cron: '23 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  tidy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: Collect the history of the sessions' videos
+        run: |
+          node cli/prs.mjs history --collect --last 3
+          if [ -n "$(git status --porcelain gallery/history.jsonl)" ]; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -q -m 'history: videos made by cloud sessions' gallery/history.jsonl
+            git push -q origin HEAD:main
+          fi
+
+      - name: Close finished sessions
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          cutoff=$(date -u -d '2 days ago' +%s)
+          gh pr list --state open --draft --app copilot-swe-agent --limit 100 \
+            --json number,updatedAt --jq '.[] | "\(.number) \(.updatedAt)"' |
+          while read -r number updated; do
+            [ "$(date -u -d "$updated" +%s)" -lt "$cutoff" ] || continue
+            other=$(gh pr view "$number" --json files --jq '[.files[].path | select((startswith("deliver/") or startswith("gallery/")) | not)] | length')
+            [ "$other" = 0 ] || continue
+            gh pr close "$number" --delete-branch --comment "Closed automatically: this session's videos were delivered in Slack and its history is on main; nothing here to merge."
+          done

@@ -1,0 +1,34 @@
+{
+	"seed": "microsoft-vscode-338981:1",
+	"motion": "canvas",
+	"layout": "row",
+	"beats": {
+		"title": {
+			"need": "title",
+			"treatment": "title.frame",
+			"why": "used 1 video ago; fewest alternatives"
+		},
+		"platforms": {
+			"need": "compare",
+			"treatment": "compare.wipe",
+			"why": "not used in recent videos"
+		},
+		"message": {
+			"need": "flow",
+			"treatment": "flow.pipeline",
+			"why": "not used in recent videos"
+		},
+		"interaction": {
+			"need": "ui",
+			"treatment": "ui.toasts",
+			"why": "not used in recent videos"
+		},
+		"status": {
+			"need": "status",
+			"treatment": "status.board",
+			"why": "not used in recent videos"
+		}
+	},
+	"overrides": {},
+	"pickedAt": "2026-10-01T18:59:21.724Z"
+}
