@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // prs: make an explainer video for a pull request. Run `prs help` (or node cli/prs.mjs help).
-import { resolveSlug, timed } from './lib/common.mjs';
+import { guardOffline, resolveSlug, timed } from './lib/common.mjs';
 
 const HELP = `prs: pull request explainer videos
 
@@ -11,7 +11,7 @@ const HELP = `prs: pull request explainer videos
   prs summary [triage.json]          the closing Slack message for a triage run
   prs budget                         minutes left in this cloud session (start a video only with 20 or more)
   prs prefetch [--text "..."]        cache the PRs named in a cloud session's request (its setup steps run this)
-  prs new <PR URL | owner/repo#n>    fetch the PR into videos/<slug>/: pr.json, pr.diff, brief.md, storyboard skeleton
+  prs new <PR URL | owner/repo#n>    fetch the PR and the files it changes into videos/<slug>/ (brief.md, storyboard skeleton)
   prs check [slug]                   check the storyboard: length window, cues, placeholders, evidence anchors
   prs voice [slug] [--provider p]    narration + word timing (providers: auto, mai, kokoro, recording, silent)
   prs direct [slug] [--seed n]       pick the diagram treatments and motion for each beat; scaffold scenes.js
@@ -27,6 +27,8 @@ const HELP = `prs: pull request explainer videos
   prs gallery [--upload]             rebuild the README gallery (previews; --upload puts the videos in the release)
   prs report [slug]                  where the time went
   prs smoke [--provider p]           make a short demo video end to end with timings (checks this machine)
+
+PRS_OFFLINE=1: no network (an agent sandbox): run prs new before, then everything works from what it downloaded.
 `;
 
 function parseArgs(argv) {
@@ -50,6 +52,7 @@ function parseArgs(argv) {
 }
 
 async function main() {
+	guardOffline();
 	const [cmd, ...rest] = process.argv.slice(2);
 	const args = parseArgs(rest);
 	const slugArg = () => resolveSlug(args._[0]);
@@ -111,9 +114,12 @@ async function main() {
 		}
 		case 'new': {
 			const { newVideo } = await import('./lib/fetch.mjs');
-			const { ref, data } = await timed(null, 'new', () => newVideo(args._[0], args._[1], { force: !!args.force }));
-			console.log(`videos/${ref.slug}: ${data.facts.title}`);
+			const { ref, data, code, reused } = await timed(null, 'new', () => newVideo(args._[0], args._[1], { force: !!args.force }));
+			console.log(`videos/${ref.slug}: ${data.facts.title}${reused ? ' (downloaded before this run: offline)' : ''}`);
 			console.log(`  +${data.facts.additions} \u2212${data.facts.deletions} in ${data.facts.changedFiles} files \u00b7 head ${data.facts.headSha9} \u00b7 ${data.tier.name}: ${data.tier.seconds[0]}-${data.tier.seconds[1]} s, ${data.tier.beats} beats`);
+			if (code) {
+				console.log(`  code: ${code.saved} of the ${data.facts.files.length} changed files saved at the head commit${code.failed.length ? ` (not downloaded: ${code.failed.map(f => f.path).join(', ')})` : ''}`);
+			}
 			console.log(`  read videos/${ref.slug}/brief.md, then write videos/${ref.slug}/storyboard.json`);
 			return;
 		}

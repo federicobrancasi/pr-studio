@@ -15,6 +15,9 @@ messages until it's over, and nobody answers questions. These rules come before 
    and stop there.
 6. **Leave pr-studio as it is:** no commits, pushes or pull requests, and no changes to the CLI, catalog, theme or
    guides. If something in them is broken, say so in `notes.md`.
+7. **No internet?** When `PRS_OFFLINE` is set (a sandbox without network), the PR and every file it changes were
+   downloaded before you started, and `prs new` continues from them. Everything comes from `videos/<slug>/`
+   (brief.md, pr.diff, pr.json): `gh`, `curl` and web lookups don't work, and only the changed files can be shown.
 
 `prs publish` puts the result in the delivery folder the job sets (`PRS_DELIVER`): the mp4, its captions and
 `<slug>.json` (PR, headline, length). That is all the job needs. End with a two-line summary: the video's path

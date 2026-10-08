@@ -7,7 +7,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import zlib from 'node:zlib';
 import { execFileSync } from 'node:child_process';
-import { CACHE } from './common.mjs';
+import { CACHE, isOffline } from './common.mjs';
 
 const HTTP_CACHE = path.join(CACHE, 'http');
 let token;
@@ -36,15 +36,23 @@ function cacheFile(url, accept) {
  * GET a GitHub URL. Returns { body (text), headers, blocked }. auth: false never sends a token (public hosts); a string
  * is the token to use (another account's, e.g. CHANGELOG_TOKEN).
  * When the Copilot agent's firewall blocks the host (or the network is down), a cached response is returned with
- * blocked: true: the setup steps prefetch the session's PRs outside the firewall (prs prefetch).
+ * blocked: true: the setup steps prefetch the session's PRs outside the firewall (prs prefetch). In offline mode
+ * (PRS_OFFLINE) it never touches the network: the cached response, or an error at once.
  */
 export async function request(url, { accept = 'application/vnd.github+json', auth: useToken = true } = {}) {
+	const cached = cacheFile(url, accept);
+	if (isOffline()) {
+		if (!fs.existsSync(cached)) {
+			throw new Error(`Offline (PRS_OFFLINE): ${url} was not downloaded before this run`);
+		}
+		const saved = JSON.parse(fs.readFileSync(cached, 'utf8'));
+		return { body: saved.body, headers: new Headers(saved.headers), offline: true };
+	}
 	const headers = { Accept: accept, 'User-Agent': 'pr-studio', 'X-GitHub-Api-Version': '2022-11-28' };
 	const auth = typeof useToken === 'string' ? useToken : useToken ? githubToken() : null;
 	if (auth) {
 		headers.Authorization = `Bearer ${auth}`;
 	}
-	const cached = cacheFile(url, accept);
 	let previous = null;
 	if (fs.existsSync(cached)) {
 		previous = JSON.parse(fs.readFileSync(cached, 'utf8'));
@@ -117,6 +125,9 @@ export async function paginate(apiPath) {
 
 /** GraphQL needs a token; returns null without one or when it fails (callers fall back to REST data). */
 export async function graphql(query, variables) {
+	if (isOffline()) {
+		return null;
+	}
 	const auth = githubToken();
 	if (!auth) {
 		return null;

@@ -1,8 +1,8 @@
 // prs new: fetch a pull request (any repo) into videos/<slug>/: pr.json, pr.diff, brief.md and a storyboard skeleton.
 import fs from 'node:fs';
 import path from 'node:path';
-import { parsePrRef, videoDir, writeJson } from './common.mjs';
-import { parseDiff } from './code.mjs';
+import { isOffline, parsePrRef, readJson, videoDir, writeJson } from './common.mjs';
+import { cacheChangedFiles, parseDiff } from './code.mjs';
 import { api, graphql, paginate, prDiff } from './github.mjs';
 
 export function isTestFile(p) {
@@ -272,6 +272,13 @@ export function writeBrief(dir, data) {
 export async function newVideo(input, second, { force = false } = {}) {
 	const ref = parsePrRef(input, second);
 	const dir = videoDir(ref.slug);
+	if (isOffline()) {
+		// No network (an agent sandbox): the setup ran prs new before the agent started; continue from there.
+		if (!fs.existsSync(path.join(dir, 'pr.json'))) {
+			throw new Error(`Offline (PRS_OFFLINE): ${ref.full}#${ref.number} was not downloaded before this run (prs new needs the network once)`);
+		}
+		return { ref, data: readJson(path.join(dir, 'pr.json')), reused: true };
+	}
 	if (fs.existsSync(path.join(dir, 'storyboard.json')) && !force) {
 		throw new Error(`videos/${ref.slug} already exists. Continue there, or run prs new ${input} --force to refetch (keeps your storyboard and scenes).`);
 	}
@@ -280,6 +287,7 @@ export async function newVideo(input, second, { force = false } = {}) {
 	writeJson(path.join(dir, 'pr.json'), { facts: data.facts, body: data.body, symbols: data.symbols, tests: data.tests, tier: data.tier });
 	fs.writeFileSync(path.join(dir, 'pr.diff'), data.diff);
 	writeBrief(dir, data);
+	const code = await cacheChangedFiles(ref.slug, data.facts);
 	const sb = path.join(dir, 'storyboard.json');
 	if (!fs.existsSync(sb)) {
 		const middle = Array.from({ length: data.tier.beats - 2 }, (_, i) => ({ id: `beat${i + 2}`, need: 'TODO', say: 'TODO', cues: {}, claims: [] }));
@@ -294,5 +302,5 @@ export async function newVideo(input, second, { force = false } = {}) {
 			],
 		});
 	}
-	return { ref, data };
+	return { ref, data, code };
 }

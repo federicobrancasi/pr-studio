@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { CACHE, CONFIG_FILE, DEFAULT_CONFIG, ROOT, loadConfig, sha256File, writeJson } from './common.mjs';
+import { CACHE, CONFIG_FILE, DEFAULT_CONFIG, ROOT, isOffline, loadConfig, sha256File, writeJson } from './common.mjs';
 import { chromePath } from './browser.mjs';
 
 const KOKORO = {
@@ -40,17 +40,21 @@ export async function doctor({ samples = false } = {}) {
 	console.log('pr-studio doctor');
 	const major = Number(process.versions.node.split('.')[0]);
 	major >= 20 ? ok(`node ${process.versions.node}`) : (fail(`node ${process.versions.node}: needs 20 or newer`), problems++);
-	try {
-		// A repos/ call, not /rate_limit: the cloud agent's firewall rule may allow only https://api.github.com/repos/.
-		const { request, githubToken } = await import('./github.mjs');
-		const { headers, blocked } = await request('https://api.github.com/repos/microsoft/vscode');
-		const source = process.env.PRS_GITHUB_TOKEN ? 'PRS_GITHUB_TOKEN' : process.env.GH_TOKEN ? 'GH_TOKEN' : process.env.GITHUB_TOKEN ? 'GITHUB_TOKEN' : githubToken() ? 'gh' : 'no token';
-		const limit = Number(headers.get('x-ratelimit-limit') ?? 0), remaining = Number(headers.get('x-ratelimit-remaining') ?? 0);
-		blocked ? warn('GitHub API blocked by the agent firewall: only the PRs named in the request (prefetched by the setup steps) can be read; allow https://api.github.com/repos/ for the rest')
-			: limit > 60 || !limit ? ok(`GitHub API (${source}${limit ? `, ${remaining}/${limit} requests left this hour` : ''})`) : warn(`GitHub API without a token: ${remaining}/60 requests left this hour (enough for a few PRs; set PRS_GITHUB_TOKEN or sign in with gh for more)`);
-	} catch (error) {
-		fail(`GitHub API: ${error.message}`);
-		problems++;
+	if (isOffline()) {
+		ok('GitHub: offline (PRS_OFFLINE), from what prs new downloaded before this run');
+	} else {
+		try {
+			// A repos/ call, not /rate_limit: the cloud agent's firewall rule may allow only https://api.github.com/repos/.
+			const { request, githubToken } = await import('./github.mjs');
+			const { headers, blocked } = await request('https://api.github.com/repos/microsoft/vscode');
+			const source = process.env.PRS_GITHUB_TOKEN ? 'PRS_GITHUB_TOKEN' : process.env.GH_TOKEN ? 'GH_TOKEN' : process.env.GITHUB_TOKEN ? 'GITHUB_TOKEN' : githubToken() ? 'gh' : 'no token';
+			const limit = Number(headers.get('x-ratelimit-limit') ?? 0), remaining = Number(headers.get('x-ratelimit-remaining') ?? 0);
+			blocked ? warn('GitHub API blocked by the agent firewall: only the PRs named in the request (prefetched by the setup steps) can be read; allow https://api.github.com/repos/ for the rest')
+				: limit > 60 || !limit ? ok(`GitHub API (${source}${limit ? `, ${remaining}/${limit} requests left this hour` : ''})`) : warn(`GitHub API without a token: ${remaining}/60 requests left this hour (enough for a few PRs; set PRS_GITHUB_TOKEN or sign in with gh for more)`);
+		} catch (error) {
+			fail(`GitHub API: ${error.message}`);
+			problems++;
+		}
 	}
 	if (!fs.existsSync(path.join(ROOT, 'node_modules', 'esbuild'))) {
 		console.log('  installing node packages...');
@@ -107,7 +111,7 @@ export async function doctor({ samples = false } = {}) {
 			}
 		}
 		ok('Kokoro voice model (Apache-2.0)');
-		const w = spawnSync(py, ['-c', 'from faster_whisper import WhisperModel; WhisperModel("small.en", compute_type="int8")'], { encoding: 'utf8', env: { ...process.env, HF_HUB_DISABLE_TELEMETRY: '1' } });
+		const w = spawnSync(py, ['-c', 'from faster_whisper import WhisperModel; WhisperModel("small.en", compute_type="int8")'], { encoding: 'utf8', env: { ...process.env, HF_HUB_DISABLE_TELEMETRY: '1', ...(isOffline() ? { HF_HUB_OFFLINE: '1' } : {}) } });
 		w.status === 0 ? ok('Whisper small.en (word timing and the sync gate)') : (fail(`Whisper model: ${w.stderr.trim().split('\n').at(-1)}`), problems++);
 		if (samples) {
 			const out = path.join(loadConfig().deliver, 'voice-samples');

@@ -4,7 +4,8 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createHighlighter } from 'shiki';
 import { codeKey } from '../../engine/text.js';
-import { ROOT, buildDir } from './common.mjs';
+import { ROOT, buildDir, isOffline } from './common.mjs';
+import { fileAt } from './github.mjs';
 
 const LANG = {
 	ts: 'typescript', mts: 'typescript', cts: 'typescript', tsx: 'tsx', js: 'javascript', mjs: 'javascript', cjs: 'javascript', jsx: 'jsx',
@@ -65,11 +66,42 @@ export function parseDiff(diffText) {
 	return files;
 }
 
+/** Not worth downloading in advance: nobody shows a lock file or a binary in a video. */
+const NOT_SHOWN = /(^|\/)(package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|Cargo\.lock)$|\.(png|jpe?g|gif|ico|webp|bmp|woff2?|ttf|otf|eot|mp3|mp4|webm|wav|zip|gz|tgz|vsix|exe|dll|so|dylib|node|wasm|pdf)$/i;
+
+const sourceFile = (slug, facts, filePath) => path.join(buildDir(slug), 'src', facts.headSha9, filePath);
+
+/**
+ * Saves every file the PR changes, at its head commit, where fileAtHead looks first: the rest of the video can then
+ * be made without network (PRS_OFFLINE). Removed, binary and lock files are skipped; a file that fails is reported.
+ */
+export async function cacheChangedFiles(slug, facts, { concurrency = 8 } = {}) {
+	const todo = facts.files.filter(f => f.status !== 'removed' && !NOT_SHOWN.test(f.path) && !fs.existsSync(sourceFile(slug, facts, f.path)));
+	const failed = [];
+	let next = 0;
+	const worker = async () => {
+		while (next < todo.length) {
+			const file = todo[next++];
+			try {
+				const text = await fileAt(facts.repo, facts.headSha, file.path);
+				fs.mkdirSync(path.dirname(sourceFile(slug, facts, file.path)), { recursive: true });
+				fs.writeFileSync(sourceFile(slug, facts, file.path), text);
+			} catch (error) {
+				failed.push({ path: file.path, error: String(error.message).split('\n')[0] });
+			}
+		}
+	};
+	await Promise.all(Array.from({ length: Math.min(concurrency, todo.length) }, worker));
+	return { saved: facts.files.filter(f => fs.existsSync(sourceFile(slug, facts, f.path))).length, failed };
+}
+
 export function fileAtHead(slug, facts, filePath) {
-	const dir = path.join(buildDir(slug), 'src', facts.headSha9);
-	const cached = path.join(dir, filePath);
+	const cached = sourceFile(slug, facts, filePath);
 	if (fs.existsSync(cached)) {
 		return fs.readFileSync(cached, 'utf8');
+	}
+	if (isOffline()) {
+		throw new Error(`${filePath} is not available offline: only the files this PR changes were downloaded before this run (videos/${slug}/build/src/${facts.headSha9}/). Show one of those instead.`);
 	}
 	let text;
 	try {

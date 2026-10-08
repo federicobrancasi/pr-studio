@@ -161,13 +161,33 @@ export function venvPython() {
 }
 
 /**
+ * Offline mode (PRS_OFFLINE=1), for agent sandboxes without network: GitHub data comes only from what `prs new`
+ * downloaded before the run (the PR and every file it changes), the voice is Kokoro, and Whisper loads from disk.
+ */
+export function isOffline() {
+	return !!process.env.PRS_OFFLINE && process.env.PRS_OFFLINE !== '0';
+}
+
+/** Offline, any network request this process still makes fails at once with a clear error instead of hanging. */
+export function guardOffline() {
+	if (!isOffline()) {
+		return;
+	}
+	const original = globalThis.fetch;
+	globalThis.fetch = (input, init) => {
+		const url = String(input?.url ?? input);
+		return /^https?:/i.test(url) ? Promise.reject(new Error(`Offline (PRS_OFFLINE): no network for ${url}`)) : original(input, init);
+	};
+}
+
+/**
  * Environment for voice/voice.py: our ffmpeg, no telemetry, and no Hugging Face lookups once the Whisper model
  * is cached (the cloud agent's firewall blocks huggingface.co; the model is downloaded in the setup steps).
  */
 export function voiceEnv() {
 	const hub = path.join(process.env.HF_HOME ?? path.join(os.homedir(), '.cache', 'huggingface'), 'hub');
 	const cached = fs.existsSync(path.join(hub, 'models--Systran--faster-whisper-small.en'));
-	return { ...process.env, PRS_FFMPEG: findFfmpeg(), HF_HUB_DISABLE_TELEMETRY: '1', ...(cached && !process.env.HF_HUB_OFFLINE ? { HF_HUB_OFFLINE: '1' } : {}) };
+	return { ...process.env, PRS_FFMPEG: findFfmpeg(), HF_HUB_DISABLE_TELEMETRY: '1', ...((cached || isOffline()) && !process.env.HF_HUB_OFFLINE ? { HF_HUB_OFFLINE: '1' } : {}) };
 }
 
 /** Hash of everything in the storyboard that changes the narration audio or its cue times. */

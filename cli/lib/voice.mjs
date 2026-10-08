@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
-import { ROOT, buildDir, findFfmpeg, loadConfig, readJson, storyboardVoiceHash, venvPython, videoDir, voiceEnv, writeJson } from './common.mjs';
+import { ROOT, buildDir, findFfmpeg, isOffline, loadConfig, readJson, storyboardVoiceHash, venvPython, videoDir, voiceEnv, writeJson } from './common.mjs';
 import { estimateTimeline, resolvePlaceholders } from './timeline.mjs';
 
 function writeScript(slug, storyboard, facts) {
@@ -21,7 +21,10 @@ export async function voice(slug, { provider, force = false } = {}) {
 	fs.mkdirSync(bdir, { recursive: true });
 	const storyboard = readJson(path.join(vdir, 'storyboard.json'));
 	const facts = readJson(path.join(vdir, 'pr.json')).facts;
-	const chosen = provider ?? loadConfig().voice.provider;
+	let chosen = provider ?? loadConfig().voice.provider;
+	if (isOffline() && (!chosen || chosen === 'auto')) {
+		chosen = 'kokoro'; // MAI-Voice-2 needs Azure
+	}
 	if (chosen === 'recording') {
 		const dir = writeScript(slug, storyboard, facts);
 		const has = fs.existsSync(dir) && fs.readdirSync(dir).some(f => /\.(wav|m4a|mp3|aiff?|flac|ogg)$/i.test(f));
