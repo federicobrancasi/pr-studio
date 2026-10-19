@@ -1,7 +1,7 @@
 // The diagram catalog. Each export is a namespace of treatments for one explanation need:
 //   import { title, concept, exchange, rules, architecture, status } from '../../catalog/index.js';
 //   exchange.lifelines({ ... })
-// `prs catalog` lists every treatment with its params; guides/visuals.md shows a still of each.
+// `prs catalog` lists every treatment with its params; the video skill's catalog.png shows one picture of each.
 export * as title from './title.js';
 export * as concept from './concept.js';
 export * as exchange from './exchange.js';

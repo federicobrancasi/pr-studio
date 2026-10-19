@@ -14,10 +14,10 @@ export const track = defineTreatment({
 	when: 'Something moves through 3-5 states (signed out -> negotiating -> authorized; queued -> running -> done), maybe with a failure state.',
 	params: {
 		eyebrow: 'label', title: 'label',
-		states: '[{ title, sub, icon, tone, at }]  (3-5, in order)',
+		states: '[{ title, sub (about 30 characters: one line), icon, tone, at }]  (3-5, in order)',
 		edges: '[{ label }]  (labels of the transitions between consecutive states; optional)',
 		marker: '{ text, icon }  (what moves)',
-		fail: '{ from: state number, title, sub, at }  (optional dead end below a state)',
+		fail: '{ from: state number, title, sub, tone (red by default; neutral for an end that is not a failure), icon, at }  (optional dead end below a state)',
 	},
 	demo: () => ({
 		eyebrow: label('The lifecycle'), title: label('A download now retries before it fails'),
@@ -53,9 +53,13 @@ export const track = defineTreatment({
 		if (p.fail) {
 			const k = (p.fail.from ?? 2) - 1;
 			need(nodes[k], 'fail.from: no such state');
-			const line = connector(svg, [[xs[k], Y + 160], [xs[k], Y + 214]], { color: C.red, width: 3, radius: 0 });
-			const box = el('div', 'st-abs', root, { left: Math.max(96, xs[k] - 210), width: 420, top: Y + 224, display: 'flex', justifyContent: 'center' });
-			pill(box, { tone: 'red', iconName: 'dismiss', text: p.fail.title, size: 'l' });
+			const tone = p.fail.tone ?? 'red';
+			const line = connector(svg, [[xs[k], Y + 160], [xs[k], Y + 214]], { color: TONE[tone]?.fg ?? C.red, width: 3, radius: 0 });
+			const box = el('div', 'st-abs', root, { left: Math.max(96, xs[k] - 210), width: 420, top: Y + 224, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 });
+			pill(box, { tone, iconName: p.fail.icon ?? (tone === 'red' ? 'dismiss' : 'info'), text: p.fail.title, size: 'l' });
+			if (p.fail.sub) {
+				txt(box, p.fail.sub, 'st-small', { display: 'block', fontSize: 19, textAlign: 'center' }, 'div');
+			}
 			fail = { line, box, at: ctx.at(p.fail.at, Math.max(1, ctx.beat.duration - 2.4)) };
 		}
 		return { h, xs, Y, base, prog2, nodes, edges, marker, times, fail };

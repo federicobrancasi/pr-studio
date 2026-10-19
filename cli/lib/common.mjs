@@ -7,15 +7,28 @@ import { fileURLToPath } from 'node:url';
 
 export const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 export const CACHE = path.join(os.homedir(), '.cache', 'pr-studio');
-export const CONFIG_FILE = path.join(ROOT, 'pr-studio.config.json');
+/** Settings and the variety history: outside the engine copy, which setup replaces on every update. PRS_HOME moves it. */
+export const STATE = process.env.PRS_HOME ? path.resolve(process.env.PRS_HOME) : CACHE;
+/** Running in the pr-studio repository, which has a gallery (the copy the plugin installs has none), and without
+ * PRS_HOME: the repository keeps its own config file, history and gallery. */
+export const IN_REPO = !process.env.PRS_HOME && fs.existsSync(path.join(ROOT, 'gallery'));
+export const CONFIG_FILE = IN_REPO && fs.existsSync(path.join(ROOT, 'pr-studio.config.json')) ? path.join(ROOT, 'pr-studio.config.json') : path.join(STATE, 'config.json');
+
+/** The most a video or a deck may take. There is no minimum: as short as covering the six answers allows. The last
+ * word ends by 86 s, so the file, with the end card's 4 s, stays within 90 s; at the default pace that is about 190
+ * words. */
+export const CAP = { seconds: 86, fileSeconds: 90, words: 190, slides: 12 };
 
 export const DEFAULT_CONFIG = {
 	voice: {
 		provider: 'auto',
+		// How much faster than its own pace the synthesized voice speaks (1 is the voice's pace; recordings keep theirs).
+		pace: 1.1,
 		kokoro: { voice: 'am_michael', speed: 1.0 },
 		mai: { voice: 'en-US-Grant:MAI-Voice-2', region: 'eastus2', azResource: null, azResourceGroup: null, azSubscription: null },
 	},
 	deliver: path.join(os.homedir(), 'Downloads', 'pr-videos'),
+	deliverDecks: path.join(os.homedir(), 'Downloads', 'pr-decks'),
 	render: { workers: 0 },
 	novelty: { lookback: 3, maxRepeatShare: 0.5 },
 };
@@ -35,6 +48,19 @@ export function loadConfig() {
 		config.deliver = path.resolve(ROOT, process.env.PRS_DELIVER);
 	}
 	return config;
+}
+
+/** voice.pace from the settings: how much faster than its own pace the synthesized voice speaks (a recording, or
+ * silent captions, keep their own). */
+export function voicePace(config = loadConfig()) {
+	if (['recording', 'silent'].includes(config.voice?.provider)) {
+		return 1;
+	}
+	const pace = Number(config.voice?.pace ?? 1);
+	if (!(pace >= 0.5 && pace <= 2)) {
+		throw new Error(`voice.pace in ${CONFIG_FILE} must be between 0.5 and 2 (it is ${config.voice?.pace})`);
+	}
+	return pace;
 }
 
 export function videoDir(slug) {

@@ -66,10 +66,10 @@ test('every pick gets a video sized like prs new sizes it, or an error when the 
 	};
 	const plan = await planChangelog(parseReport(REPORT), { fetchMeta });
 	assert.deepStrictEqual(plan.entries.map(e => [e.number, e.kind, e.seconds, e.reasons.join('; ')]), [
-		[101, 'small', 48, '2 changed lines outside tests; 1 area'],
-		[102, 'large', 93, '237 changed lines outside tests; 1 area; touches security, protocols or compatibility'],
+		[101, 'small', 40, '2 changed lines outside tests; 1 area'],
+		[102, 'large', 65, '237 changed lines outside tests; 1 area; touches security, protocols or compatibility (it says "sandbox")'],
 		[104, 'error', 0, 'GitHub 404 for repos/contoso/editor/pulls/104: Not Found'],
-		[110, 'small', 48, '25 changed lines outside tests; 1 area'],
+		[110, 'small', 40, '25 changed lines outside tests; 1 area'],
 	]);
 });
 

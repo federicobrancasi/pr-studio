@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
-import { ROOT, buildDir, findFfmpeg, isOffline, loadConfig, readJson, storyboardVoiceHash, venvPython, videoDir, voiceEnv, writeJson } from './common.mjs';
+import { CAP, ROOT, buildDir, findFfmpeg, isOffline, loadConfig, readJson, storyboardVoiceHash, venvPython, videoDir, voiceEnv, writeJson } from './common.mjs';
 import { estimateTimeline, resolvePlaceholders } from './timeline.mjs';
 
 function writeScript(slug, storyboard, facts) {
@@ -16,7 +16,7 @@ function writeScript(slug, storyboard, facts) {
 	return dir;
 }
 
-export async function voice(slug, { provider, force = false } = {}) {
+export async function voice(slug, { provider, force = false, redo } = {}) {
 	const vdir = videoDir(slug), bdir = buildDir(slug);
 	fs.mkdirSync(bdir, { recursive: true });
 	const storyboard = readJson(path.join(vdir, 'storyboard.json'));
@@ -45,7 +45,7 @@ export async function voice(slug, { provider, force = false } = {}) {
 		return timeline;
 	}
 	const py = venvPython();
-	const args = [path.join(ROOT, 'voice', 'voice.py'), 'synth', '--video', vdir, ...(chosen && chosen !== 'auto' ? ['--provider', chosen] : []), ...(force ? ['--force'] : [])];
+	const args = [path.join(ROOT, 'voice', 'voice.py'), 'synth', '--video', vdir, ...(chosen && chosen !== 'auto' ? ['--provider', chosen] : []), ...(force ? ['--force'] : []), ...(redo ? ['--redo', String(redo)] : [])];
 	await new Promise((resolve, reject) => {
 		const child = spawn(py, args, { stdio: ['ignore', 'inherit', 'inherit'], env: voiceEnv() });
 		child.on('error', reject);
@@ -53,9 +53,9 @@ export async function voice(slug, { provider, force = false } = {}) {
 	});
 	const timeline = readJson(path.join(bdir, 'timeline.json'));
 	writeJson(path.join(bdir, 'voice.json'), { provider: timeline.voice.provider, voice: timeline.voice.name, storyboard: storyboardVoiceHash(storyboard), at: new Date().toISOString() });
-	const seconds = timeline.total;
-	const [lo, hi] = storyboard.length?.seconds ?? [40, 100];
-	const note = seconds < lo - 3 ? ` (shorter than the ${lo}-${hi} s target)` : seconds > hi + 6 ? ` (longer than the ${lo}-${hi} s target: trim the narration)` : '';
-	console.log(`narration ready: ${seconds.toFixed(1)} s${note}`);
+	// The narration's length is where its last word ends: what the cap counts (the file adds the end card).
+	const seconds = Math.max(0, ...timeline.beats.flatMap(b => b.words.map(w => w.b)));
+	const note = seconds > CAP.seconds ? `: past the ${CAP.seconds} s cap (${CAP.fileSeconds} s with the end card), cut the narration and voice it again` : `, within the ${CAP.seconds} s cap`;
+	console.log(`narration ready: the last word ends at ${seconds.toFixed(1)} s${note}`);
 	return timeline;
 }

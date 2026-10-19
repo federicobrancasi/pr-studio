@@ -28,6 +28,9 @@ export const MS_LOGO = ['#f25022', '#7fba00', '#00a4ef', '#ffb900'];
 export const SAFE = { x0: 96, x1: 1824, y0: 96, y1: 930 };
 /** Region below a slide heading. */
 export const CONTENT = { x: 96, y: 236, w: 1728, h: 694 };
+/** Where a beat's body is fitted (engine/stage.js): scaled up to at most `max` and centred between the heading and the
+ * caption band, with room left above the band for entrance motion. */
+export const FILL = { x0: 96, x1: 1824, y0: 236, y1: 904, max: 1.25 };
 
 export function tone(name) {
 	const value = TONE[name ?? 'neutral'];

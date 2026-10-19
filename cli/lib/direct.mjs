@@ -54,7 +54,7 @@ function toSource(value, indent = '\t\t\t') {
 	return JSON.stringify(value);
 }
 
-export async function direct(slug, { seed, motion: forcedMotion, use, reason, force = false } = {}) {
+export async function direct(slug, { seed, motion: forcedMotion, use, reason, force = false, fresh = false } = {}) {
 	const vdir = videoDir(slug);
 	const storyboard = readJson(path.join(vdir, 'storyboard.json'));
 	const beats = storyboard.beats;
@@ -76,7 +76,10 @@ export async function direct(slug, { seed, motion: forcedMotion, use, reason, fo
 			}
 		}
 	});
-	const random = rng(seed ?? `${slug}:${history.length}`);
+	// A second run keeps what the first picked (--use and --motion change only what they name; a new beat gets a pick):
+	// videos published meanwhile don't re-roll a direction the scenes are already written for. --fresh picks again.
+	const previous = !fresh && fs.existsSync(path.join(vdir, 'direction.json')) ? readJson(path.join(vdir, 'direction.json')) : null;
+	const random = rng(seed ?? previous?.seed ?? `${slug}:${history.length}`);
 	const overrides = {};
 	for (const pair of String(use ?? '').split(',').filter(Boolean)) {
 		const [id, treatment] = pair.split('=');
@@ -94,6 +97,15 @@ export async function direct(slug, { seed, motion: forcedMotion, use, reason, fo
 		if (overrides[b.id]) {
 			chosen[b.id] = { need: b.need, treatment: overrides[b.id].treatment, why: `override: ${overrides[b.id].reason}` };
 			usedHere.add(overrides[b.id].treatment);
+			continue;
+		}
+		const kept = previous?.beats?.[b.id];
+		if (kept && kept.need === b.need && catalog.some(t => t.id === kept.treatment)) {
+			chosen[b.id] = kept;
+			usedHere.add(kept.treatment);
+			if (previous.overrides?.[b.id]) {
+				overrides[b.id] = previous.overrides[b.id];
+			}
 			continue;
 		}
 		const options = catalog.filter(t => t.need === b.need);
@@ -114,10 +126,10 @@ export async function direct(slug, { seed, motion: forcedMotion, use, reason, fo
 	}
 	const lastMotion = recent[0]?.motion;
 	const motions = [{ id: 'slides', weight: lastMotion === 'slides' ? 0.4 : 1 }, { id: 'canvas', weight: lastMotion === 'canvas' ? 0.4 : 1 }];
-	const motion = forcedMotion ?? weighted(random, motions).id;
+	const motion = forcedMotion ?? previous?.motion ?? weighted(random, motions).id;
 	const layouts = ['row', 'column', 'grid'];
-	const layout = motion === 'canvas' ? layouts[Math.floor(random() * layouts.length)] : undefined;
-	const direction = { seed: seed ?? `${slug}:${history.length}`, motion, ...(layout ? { layout } : {}), beats: chosen, overrides, pickedAt: new Date().toISOString() };
+	const layout = motion !== 'canvas' ? undefined : previous?.motion === 'canvas' && previous.layout ? previous.layout : layouts[Math.floor(random() * layouts.length)];
+	const direction = { seed: seed ?? previous?.seed ?? `${slug}:${history.length}`, motion, ...(layout ? { layout } : {}), beats: chosen, overrides, pickedAt: new Date().toISOString() };
 	writeJson(path.join(vdir, 'direction.json'), direction);
 
 	const scenes = path.join(vdir, 'scenes.js');

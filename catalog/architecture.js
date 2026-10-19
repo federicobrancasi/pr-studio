@@ -261,7 +261,7 @@ export const zones = defineTreatment({
 	params: {
 		eyebrow: 'label', title: 'label',
 		zones: '[{ title, sub, tone, items: [{ id, icon, title, sub, at }] }]  (2-3 zones, 1-3 items each)',
-		links: '[{ from: itemId, to: itemId, label, mono, at, tone }]  (0-4)',
+		links: '[{ from: itemId, to: itemId, label, mono, at, tone }]  (0-4; link items on the same row of neighbouring zones: a link between rows runs its label over other parts)',
 	},
 	demo: () => ({
 		eyebrow: label('Where it runs'), title: label('The window hands it over'),

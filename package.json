@@ -11,7 +11,8 @@
   },
   "scripts": {
     "prs": "node cli/prs.mjs",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "plugin": "node scripts/build-plugin.mjs"
   },
   "engines": {
     "node": ">=20"

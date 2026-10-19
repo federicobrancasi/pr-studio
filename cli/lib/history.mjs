@@ -1,10 +1,12 @@
-// The gallery ledger: what each published video used, so the next one can look different.
+// The ledger: what each published video used, so the next one can look different. In the repository it is the
+// gallery's (gallery/history.jsonl); in a copy the plugin installed, it lives in the state folder
+// (~/.cache/pr-studio/history.jsonl), so it outlasts updates of the engine.
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { ROOT, loadConfig } from './common.mjs';
+import { IN_REPO, ROOT, STATE, loadConfig } from './common.mjs';
 
-export const HISTORY = path.join(ROOT, 'gallery', 'history.jsonl');
+export const HISTORY = IN_REPO ? path.join(ROOT, 'gallery', 'history.jsonl') : path.join(STATE, 'history.jsonl');
 const parseLines = text => text.split('\n').filter(Boolean).map(l => JSON.parse(l));
 
 export function readHistory(file = HISTORY) {

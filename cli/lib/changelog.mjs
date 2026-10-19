@@ -11,7 +11,7 @@ import path from 'node:path';
 import { ROOT, writeJson } from './common.mjs';
 import { api, githubToken, runArtifact } from './github.mjs';
 import { fetchPrMeta, lengthTier, summarizeFiles } from './fetch.mjs';
-import { cut } from './triage.mjs';
+import { SECONDS, cut } from './triage.mjs';
 
 const SOURCE = { repo: 'microsoft/vscode-engineering', workflow: 'changelog-pr-report.lock.yml', artifact: 'changelog-pr-report', file: 'report.md' };
 const TOP = 5;
@@ -63,7 +63,7 @@ export async function planChangelog(report, { fetchMeta = fetchPrMeta } = {}) {
 		// The same sizing as prs new, so the plan matches the brief the video is made from.
 		const { files, areas } = summarizeFiles(meta.rawFiles);
 		const tier = lengthTier({ title: meta.pr.title, files, areas }, meta.pr.body ?? '');
-		return { ...entry, kind: tier.name, seconds: Math.round((tier.seconds[0] + tier.seconds[1]) / 2), reasons: tier.reasons };
+		return { ...entry, kind: tier.name, seconds: SECONDS[tier.name], reasons: tier.reasons };
 	}));
 	return { title: report.title, date: report.date, entries };
 }

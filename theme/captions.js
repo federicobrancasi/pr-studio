@@ -2,7 +2,8 @@
 // In the final render they are captured once per state and composited by ffmpeg (see cli/lib/render.mjs).
 import { el } from './primitives.js';
 
-/** Splits the aligned words into one-line phrases: break at punctuation, at 9 words, at a long pause, or when too wide. */
+/** Splits the aligned words into one-line phrases: break at punctuation, after at most 9 words (evenly), at a long
+ * pause, or when too wide. */
 export function buildChunks(beats, font = '600 34px Aptos, "Segoe UI", Inter', maxWidth = 1560) {
 	const measure = document.createElement('canvas').getContext('2d');
 	measure.font = font;
@@ -16,9 +17,20 @@ export function buildChunks(beats, font = '600 34px Aptos, "Segoe UI", Inter', m
 				chunk = [];
 			}
 		};
+		const ends = word => /[.!?;:,]["')\u201d]*$/.test(word.display);
+		// A phrase longer than 9 words splits evenly (10 words make 5 + 5, not 9 + 1): no one-word captions.
+		let size = 9;
 		for (const [index, word] of words.entries()) {
 			if (typeof word.display !== 'string' || !Number.isFinite(word.a) || !Number.isFinite(word.b) || word.b < word.a) {
 				throw new Error(`Invalid caption word in beat "${beat.id}" at index ${index}`);
+			}
+			if (!chunk.length) {
+				let last = index;
+				while (last < words.length - 1 && !ends(words[last])) {
+					last++;
+				}
+				const run = last - index + 1;
+				size = run > 9 ? Math.ceil(run / Math.ceil(run / 9)) : 9;
 			}
 			const candidate = [...chunk, word].map(item => item.display).join(' ');
 			if (chunk.length && measure.measureText(candidate).width > maxWidth) {
@@ -26,8 +38,7 @@ export function buildChunks(beats, font = '600 34px Aptos, "Segoe UI", Inter', m
 			}
 			chunk.push(word);
 			const next = words[index + 1];
-			const punctuation = /[.!?;:,]["')\u201d]*$/.test(word.display);
-			if (chunk.length === 9 || punctuation || !next || (chunk.length >= 6 && next.a - word.b > 0.28)) {
+			if (chunk.length >= size || ends(word) || !next || (chunk.length >= 6 && next.a - word.b > 0.28)) {
 				flush();
 			}
 		}

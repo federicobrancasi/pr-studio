@@ -3,6 +3,7 @@
 //   canvas  every beat is a panel on one board; the camera flies from panel to panel (layout: row, column, grid)
 //   morph   slides, plus one carried object that flies from an anchor in one beat to an anchor in the next
 import { el, pill } from '../theme/primitives.js';
+import { FILL } from '../theme/tokens.js';
 import { clamp, decel, easeInOutCubic, lerp, prog, standard } from './motion.js';
 import { codeKey } from './text.js';
 
@@ -54,7 +55,9 @@ function makeAt(beat, seen) {
 		}
 		if (ref.$word !== undefined) {
 			const want = norm(ref.$word);
-			const hits = beat.words.filter(w => norm(w.display).startsWith(want));
+			// The word itself first ('To' is "to", not "tool"); a prefix only when the word isn't there whole.
+			const exact = beat.words.filter(w => norm(w.display) === want);
+			const hits = exact.length > (ref.nth ?? 0) ? exact : beat.words.filter(w => norm(w.display).startsWith(want));
 			const hit = hits[ref.nth ?? 0];
 			if (!hit) {
 				throw new Error(`Beat "${beat.id}": word "${ref.$word}" (#${ref.nth ?? 0}) is not in its narration`);
@@ -139,6 +142,15 @@ export function createStage(app, video, project) {
 			entry.instance.layout?.();
 		} catch (error) {
 			throw new Error(`Beat "${entry.beat.id}" (${entry.spec.treatment}) layout: ${error.message}`);
+		}
+	}
+	// Treatments lay their parts out at fixed sizes from the top of the content area, so a short body leaves the lower
+	// half of the frame empty. Fit each body (not the heading, not the title frame) to the room above the captions.
+	if (video.fill !== false) {
+		for (const entry of entries) {
+			if (entry.spec.need !== 'title') {
+				fillBody(entry);
+			}
 		}
 	}
 
@@ -257,4 +269,90 @@ export function createStage(app, video, project) {
 			}
 		},
 	};
+}
+
+const SHAPES = new Set(['path', 'line', 'polyline', 'polygon', 'circle', 'ellipse', 'rect', 'text', 'image', 'use', 'img', 'canvas', 'video']);
+const NOT_DRAWN = new Set(['defs', 'marker', 'clippath', 'mask', 'pattern', 'lineargradient', 'radialgradient', 'filter', 'style', 'script']);
+const clear = color => !color || color === 'transparent' || /rgba\([^)]*,\s*0\)$/.test(color);
+/** Whether a box paints something of its own: a fill, a background image, a visible border or a ring. */
+function paints(cs) {
+	const border = ['Top', 'Right', 'Bottom', 'Left'].some(side => parseFloat(cs[`border${side}Width`]) > 0 && !clear(cs[`border${side}Color`]));
+	return !clear(cs.backgroundColor) || cs.backgroundImage !== 'none' || border || (cs.boxShadow && cs.boxShadow !== 'none');
+}
+
+/** Scales a beat's body up (never down, at most FILL.max) to fill the room between its heading and the caption band,
+ * centred vertically and kept inside the side margins. The body is measured across its whole beat (parts may move or
+ * arrive while it plays), once: everything inside keeps its own coordinates and motion, and later measurements (the
+ * morph anchors, the lint) see the fitted result. */
+function fillBody(entry) {
+	const { content, beat } = entry;
+	const body = [...content.children].filter(node => node.dataset.head === undefined);
+	if (!body.length) {
+		return;
+	}
+	const display = entry.host.style.display;
+	entry.host.style.display = 'block';
+	let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+	const range = document.createRange();
+	const add = (r, origin) => {
+		if (r.width >= 1 && r.height >= 1) {
+			x0 = Math.min(x0, r.left - origin.left);
+			y0 = Math.min(y0, r.top - origin.top);
+			x1 = Math.max(x1, r.right - origin.left);
+			y1 = Math.max(y1, r.bottom - origin.top);
+		}
+	};
+	// What is drawn, where it is visible now: text by its own extent, SVG shapes, and boxes that paint (a fill, a
+	// border, a ring). Invisible parts (a marker parked until its path starts) and empty containers don't count.
+	const walk = (n, origin) => {
+		const cs = getComputedStyle(n);
+		const tag = n.tagName.toLowerCase();
+		if (cs.display === 'none' || Number(cs.opacity) < 0.01 || NOT_DRAWN.has(tag)) {
+			return;
+		}
+		if (cs.visibility !== 'hidden') {
+			if (SHAPES.has(tag) || paints(cs)) {
+				add(n.getBoundingClientRect(), origin);
+			}
+			for (const c of n.childNodes) {
+				if (c.nodeType === 3 && c.textContent.trim()) {
+					range.selectNodeContents(c);
+					add(range.getBoundingClientRect(), origin);
+				}
+			}
+		}
+		for (const c of n.children) {
+			walk(c, origin);
+		}
+	};
+	const measure = () => {
+		const origin = content.getBoundingClientRect();
+		for (const node of body) {
+			walk(node, origin);
+		}
+	};
+	// Sampled through the beat, about every 0.4 s: parts may move or arrive while it plays.
+	const samples = Math.min(60, Math.max(8, Math.ceil((beat.end - beat.start) / 0.4)));
+	for (let i = 0; i <= samples; i++) {
+		entry.spec.impl.render(entry.instance, beat.start + ((beat.end - beat.start) * i) / samples, entry.ctx);
+		measure();
+	}
+	entry.host.style.display = display;
+	if (!Number.isFinite(x0)) {
+		return;
+	}
+	const w = x1 - x0, h = y1 - y0;
+	const k = Math.max(1, Math.min(FILL.max, (FILL.x1 - FILL.x0) / w, (FILL.y1 - FILL.y0) / h));
+	// Around its own centre horizontally (a left-aligned body stays left, a centred one centred), then into the margins.
+	const left = Math.min(Math.max((x0 + x1) / 2 - (w * k) / 2, FILL.x0), FILL.x1 - w * k);
+	const top = Math.max(FILL.y0, (FILL.y0 + FILL.y1) / 2 - (h * k) / 2);
+	const tx = left - x0 * k, ty = top - y0 * k;
+	if (k === 1 && Math.abs(tx) < 2 && Math.abs(ty) < 2) {
+		return;
+	}
+	const wrap = el('div', 'st-layer', content);
+	wrap.dataset.fill = k.toFixed(3);
+	wrap.style.transformOrigin = '0 0';
+	wrap.style.transform = `translate(${tx.toFixed(1)}px, ${ty.toFixed(1)}px) scale(${k.toFixed(4)})`;
+	wrap.append(...body);
 }

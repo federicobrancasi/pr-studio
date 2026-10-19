@@ -14,7 +14,7 @@ export const mismatch = defineTreatment({
 	id: 'concept.mismatch',
 	need: 'concept',
 	name: 'Have vs need',
-	when: 'The problem is a mismatch: what something is vs what is required (a token, a format, a permission, a version).',
+	when: 'The problem is a mismatch: what something is vs what is required (a token, a format, a permission, a version). The requirement (need) shows first, by default 0.4 s in, then what there is (have) and its rows: narrate the requirement first, or time need.at to its words.',
 	params: {
 		eyebrow: 'label', title: 'label',
 		have: '{ icon, title, rows: [{ key, value, ok, at }] }  (2-3 rows)',
@@ -153,7 +153,7 @@ export const pillars = defineTreatment({
 	need: 'concept',
 	name: 'Numbered pillars',
 	when: 'Two to four ideas, parts or reasons of equal weight ("three things change").',
-	params: { eyebrow: 'label', title: 'label', items: '[{ icon, title, text, code, at }]  (2-4)' },
+	params: { eyebrow: 'label', title: 'label', items: '[{ icon, title (about 3 words), text, code (a short code name under the text, drawn as code: ident() or quote(), not code()), at }]  (2-4)' },
 	demo: () => ({ eyebrow: label('The idea'), title: label('Three things change'), items: [
 		{ icon: 'search', title: label('Find'), text: label('Look up the setting once, at startup') },
 		{ icon: 'flash', title: label('Cache'), text: label('Keep it in memory instead of reading it per call') },
@@ -210,7 +210,7 @@ export const statement = defineTreatment({
 	need: 'concept',
 	name: 'Statement',
 	when: 'The point fits in one sentence ("the bug: X happens because Y"). Good for small PRs and for the problem beat.',
-	params: { eyebrow: 'label', parts: '[text | { text, mark: tone, at }]  (the sentence; marked parts highlight at their time)', chips: '[{ icon, text, tone, at }]  (0-4)' },
+	params: { eyebrow: 'label', parts: '[text | { text, mark: tone, at }]  (the sentence; marked parts highlight at their time)', chips: '[{ icon, text, tone, at }]  (0-4; they wrap onto a second row past the width, so keep them short)' },
 	demo: () => ({ eyebrow: label('The bug'), parts: [label('Saving a file '), { text: label('twice in a row'), mark: 'orange' }, label(' could '), { text: label('drop the second edit'), mark: 'red' }], chips: [{ icon: 'save', text: label('two saves within 50 ms') }, { icon: 'warning', text: label('one write lost'), tone: 'red' }] }),
 	mount(root, p, ctx) {
 		const parts = p.parts ?? [];

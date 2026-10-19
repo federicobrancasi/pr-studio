@@ -6,7 +6,7 @@
   python voice/voice.py samples --out DIR [--text "..."]
 
 Providers
-  mai        Azure Speech MAI-Voice-2 (key from AZURE_SPEECH_KEY, or an `az` lookup configured in pr-studio.config.json)
+  mai        Azure Speech MAI-Voice-2 (key from AZURE_SPEECH_KEY, or an `az` lookup configured in ~/.cache/pr-studio/config.json)
   kokoro     Kokoro-82M (Apache-2.0), offline on CPU via ONNX; the default when no Azure key is available
   recording  your own voice: videos/<slug>/recording/<beat id>.(wav|m4a|mp3|aiff), or one file recording/full.*
 All providers go through the same Whisper alignment and pause snapping, so captions stay exact whatever the voice.
@@ -79,8 +79,9 @@ def write_json(path: Path, data: Any) -> None:
 
 
 def load_config() -> dict[str, Any]:
-	config = {'voice': {'provider': 'auto', 'kokoro': {'voice': 'am_michael', 'speed': 1.0}, 'mai': {'voice': 'en-US-Grant:MAI-Voice-2', 'region': 'eastus2'}}}
-	path = ROOT / 'pr-studio.config.json'
+	config = {'voice': {'provider': 'auto', 'pace': 1.1, 'kokoro': {'voice': 'am_michael', 'speed': 1.0}, 'mai': {'voice': 'en-US-Grant:MAI-Voice-2', 'region': 'eastus2'}}}
+	home = os.environ.get('PRS_HOME')
+	path = (Path(home) if home else Path.home() / '.cache' / 'pr-studio') / 'config.json'
 	if path.exists():
 		user = load_json(path)
 		for key, value in user.get('voice', {}).items():
@@ -89,6 +90,17 @@ def load_config() -> dict[str, Any]:
 			else:
 				config['voice'][key] = value
 	return config
+
+
+def take_rate(provider: str, config: dict[str, Any]) -> float:
+	"""How fast a take plays against the voice's own pace: Kokoro speaks at its speed times voice.pace, a MAI take is
+	retimed by voice.pace, a recording keeps its pace."""
+	if provider not in ('kokoro', 'mai'):
+		return 1.0
+	pace = float(config['voice'].get('pace', 1.0))
+	if not 0.5 <= pace <= 2.0:
+		raise RuntimeError(f'voice.pace must be between 0.5 and 2 (it is {pace:g})')
+	return pace * float(config['voice'].get('kokoro', {}).get('speed', 1.0)) if provider == 'kokoro' else pace
 
 @dataclass
 class DisplayToken:
@@ -133,6 +145,9 @@ def get_nested_value(root: Any, path_parts: Sequence[str], expression: str) -> A
 			if part not in current:
 				raise KeyError(f"Placeholder '{expression}' references missing key '{part}'")
 			current = current[part]
+		elif isinstance(current, (list, str)) and part == 'length':
+			# {{facts.linkedIssues.length}}: the same as in JavaScript, where prs check resolves it.
+			current = len(current)
 		elif isinstance(current, list):
 			try:
 				index = int(part)
@@ -709,6 +724,17 @@ def synthesize_kokoro(jobs: list[tuple[str, Path]], voice: str, speed: float, wo
 		list(pool.map(one, jobs))
 
 
+def retime_wav(ffmpeg: str, path: Path, tempo: float) -> None:
+	"""Plays a take `tempo` times as fast at the same pitch. MAI-Voice-2 honours an SSML prosody rate only in part
+	(1.1 gave 1.05)."""
+	temp = path.with_name(f'{path.stem}.tempo.wav')
+	try:
+		run_ffmpeg(ffmpeg, ['-v', 'error', '-y', '-i', str(path), '-filter:a', f'atempo={tempo:g}', '-ac', '1', '-ar', str(SAMPLE_RATE), '-c:a', 'pcm_s16le', '-bitexact', '-map_metadata', '-1', str(temp)])
+		temp.replace(path)
+	finally:
+		temp.unlink(missing_ok=True)
+
+
 def convert_recording(ffmpeg: str, source: Path, out: Path) -> None:
 	out.parent.mkdir(parents=True, exist_ok=True)
 	run_ffmpeg(ffmpeg, ['-v', 'error', '-y', '-i', str(source), '-ac', '1', '-ar', str(SAMPLE_RATE), '-c:a', 'pcm_s16le', str(out)])
@@ -861,6 +887,9 @@ def auto_spoken(core: str) -> str | None:
 	"""Spoken form for code-like words: camelCase, ACRONYMS, dotted.names and long numbers."""
 	if core in SAY_AS:
 		return SAY_AS[core]
+	# An ordinary word with an apostrophe (it's, don't, dialog's) is read as written, not split in two.
+	if re.fullmatch(r"[A-Za-z]+(?:['\u2019][A-Za-z]+)+", core):
+		return None
 	if re.fullmatch(r'\d{5,}', core):
 		return ' '.join(DIGIT_WORDS[int(c)] for c in core)
 	if re.fullmatch(r'v?\d+(\.\d+)+', core):
@@ -891,12 +920,18 @@ def _camel_words(word: str) -> list[str]:
 	return out if pieces else [word]
 
 
-def apply_auto_pronunciations(tokens: list[DisplayToken]) -> list[DisplayToken]:
+def apply_auto_pronunciations(tokens: list[DisplayToken], pronounce: dict[str, str] | None = None) -> list[DisplayToken]:
+	# One-word pronounce entries also reach the parts of a split name: "subagent" covers CopilotSubagentTracking.
+	words = {k.lower(): v for k, v in (pronounce or {}).items() if isinstance(k, str) and isinstance(v, str) and k.strip() and ' ' not in k.strip()}
 	out = []
 	for token in tokens:
 		if token.spoken == token.display:
 			prefix, core, suffix = split_token_affixes(token.display)
 			spoken = auto_spoken(core) if core else None
+			if spoken and words:
+				# The plural of an entry too: "subagent" covers the "Subagents" in a name.
+				part = lambda w: words.get(w.lower()) or (words[w.lower()[:-1]] + 's' if w.lower().endswith('s') and w.lower()[:-1] in words else w)
+				spoken = ' '.join(part(w) for w in spoken.split())
 			if spoken:
 				full = f'{prefix}{spoken}{suffix}'
 				token = DisplayToken(token.index, token.display, full, token.normalized_display, normalize_token(full))
@@ -909,7 +944,7 @@ def prepare_beats(storyboard: dict[str, Any], facts: dict[str, Any]) -> list[Pre
 	beats = []
 	for beat in storyboard['beats']:
 		text = resolve_placeholders(beat['say'], facts)
-		tokens = apply_auto_pronunciations(apply_pronunciations(text, pronounce))
+		tokens = apply_auto_pronunciations(apply_pronunciations(text, pronounce), pronounce)
 		beats.append(PreparedBeat(beat['id'], text, tokens, spoken_text_from_tokens(tokens), beat.get('cues', {}) or {}, beat.get('gapBefore')))
 	return beats
 
@@ -925,13 +960,57 @@ def resolve_provider(requested: str | None, config: dict[str, Any], video: Path)
 	if provider in ('auto', 'mai'):
 		key = get_speech_key(config['voice'].get('mai', {}))
 		if provider == 'mai' and not key:
-			raise RuntimeError('MAI-Voice-2 needs AZURE_SPEECH_KEY (or voice.mai.azResource/azResourceGroup in pr-studio.config.json)')
+			raise RuntimeError('MAI-Voice-2 needs AZURE_SPEECH_KEY (or voice.mai.azResource/azResourceGroup in ~/.cache/pr-studio/config.json)')
 		if provider == 'auto':
 			provider = 'mai' if key else 'kokoro'
 	return provider, key
 
 
-def synth(video: Path, provider_arg: str | None, force: bool, workers: int) -> dict[str, Any]:
+NUMBER_WORDS = set('zero oh one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty thirty forty fifty sixty seventy eighty ninety hundred thousand million point and a'.split())
+DIGIT_OF = {'zero': '0', 'oh': '0', 'one': '1', 'two': '2', 'three': '3', 'four': '4', 'five': '5', 'six': '6', 'seven': '7', 'eight': '8', 'nine': '9'}
+# Number words, also run together the way normalization leaves them ("thirty-four" becomes "thirtyfour").
+NUMBER_RE = re.compile('(?:' + '|'.join(sorted(NUMBER_WORDS, key=len, reverse=True)) + ')+')
+
+
+def numbers_match(said: str, got: str) -> bool:
+	"""A number in words on one side and in digits on the other is the same thing; said digit by digit (a PR number),
+	the digits must match too."""
+	for words, digits in ((said, got), (got, said)):
+		if words and digits and re.fullmatch(r'[\d.,%]+', digits.replace(' ', '')) and all(NUMBER_RE.fullmatch(t) or t.isdigit() for t in words.split()):
+			parts = [DIGIT_OF.get(t, t if t.isdigit() else None) for t in words.split()]
+			return None in parts or ''.join(parts) == re.sub(r'\D', '', digits)
+	return False
+
+
+def same_word(a: str, b: str) -> bool:
+	"""Possessive and plural forms of the same word ("repository's", "repositories") sound alike: not a mistake."""
+	stem = lambda w: re.sub(r'(ies|s)$', '', re.sub(r'ies$', 'y', w))
+	wa, wb = a.split(), b.split()
+	return len(wa) == len(wb) and all(stem(x) == stem(y) for x, y in zip(wa, wb))
+
+
+def heard_report(model: WhisperModel, wav: Path, spoken: str) -> str:
+	"""What a listener hears in a beat, against what the voice was asked to say. The transcription is not prompted
+	with the script (that would hide mistakes), the way the sync gate in prs publish listens."""
+	segments, _info = model.transcribe(str(wav), beam_size=5, language='en', condition_on_previous_text=False)
+	meant = [t for t in (normalize_token(x) for x in spoken.split()) if t]
+	heard = [t for t in (normalize_token(x) for seg in segments for x in seg.text.split()) if t]
+	wrong, skipped = [], []
+	for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, meant, heard, autojunk=False).get_opcodes():
+		said, got = ' '.join(meant[i1:i2]), ' '.join(heard[j1:j2])
+		if tag == 'equal' or said.replace(' ', '') == got.replace(' ', '') or same_word(said, got):
+			continue
+		if numbers_match(said, got):
+			continue
+		if got:
+			wrong.append(f'"{said or "-"}" heard as "{got}"')
+		else:
+			skipped.append(f'"{said}"')
+	parts = ([f"heard differently: {'; '.join(wrong[:6])}"] if wrong else []) + ([f"missing: {'; '.join(skipped[:4])}"] if skipped else [])
+	return '  '.join(parts) if parts else 'as written'
+
+
+def synth(video: Path, provider_arg: str | None, force: bool, workers: int, redo: Sequence[str] = ()) -> dict[str, Any]:
 	config = load_config()
 	storyboard = load_json(video / 'storyboard.json')
 	facts = load_json(video / 'pr.json')['facts']
@@ -945,21 +1024,26 @@ def synth(video: Path, provider_arg: str | None, force: bool, workers: int) -> d
 	kok = config['voice'].get('kokoro', {})
 	voice_name = {'mai': mai.get('voice', 'en-US-Grant:MAI-Voice-2'), 'kokoro': kok.get('voice', 'am_michael'), 'recording': 'recording'}[provider]
 	log(f'voice: {provider} ({voice_name})')
-	speed = float(kok.get('speed', 1.0))
-	voice_key = f'{voice_name}@{speed:g}' if provider == 'kokoro' and speed != 1.0 else voice_name
+	rate = take_rate(provider, config)
+	voice_key = f'{voice_name}@{rate:g}' if rate != 1.0 else voice_name
 	t0 = time.time()
 	stale: list[PreparedBeat] = []
 	for beat in beats:
 		h = sha256_text(provider, voice_key, beat.spoken_text)
 		wav, hash_file = audio_dir / f'{beat.id}.wav', audio_dir / f'{beat.id}.hash'
-		if force or provider == 'recording' or not wav.exists() or not hash_file.exists() or hash_file.read_text().strip() != h:
+		if force or beat.id in redo or provider == 'recording' or not wav.exists() or not hash_file.exists() or hash_file.read_text().strip() != h:
 			stale.append(beat)
+	unknown = [r for r in redo if r not in {b.id for b in beats}]
+	if unknown:
+		raise RuntimeError(f'--redo: no beat {", ".join(unknown)} (beats: {", ".join(b.id for b in beats)})')
 	model = None
 	if provider == 'kokoro' and stale:
-		synthesize_kokoro([(b.spoken_text, audio_dir / f'{b.id}.wav') for b in stale], voice_name, speed, workers)
+		synthesize_kokoro([(b.spoken_text, audio_dir / f'{b.id}.wav') for b in stale], voice_name, rate, workers)
 	elif provider == 'mai' and stale:
 		def one(b: PreparedBeat) -> None:
 			synthesize_azure_speech(b.spoken_text, voice_name, mai.get('region', 'eastus2'), key, audio_dir / f'{b.id}.wav')
+			if rate != 1.0:
+				retime_wav(ffmpeg, audio_dir / f'{b.id}.wav', rate)
 		with cf.ThreadPoolExecutor(3) as pool:
 			list(pool.map(one, stale))
 	elif provider == 'recording':
@@ -989,7 +1073,8 @@ def synth(video: Path, provider_arg: str | None, force: bool, workers: int) -> d
 		asr = transcribe_words(model, wav, beat.spoken_text)
 		words, score = align_tokens(beat.tokens, asr, duration)
 		if score < 0.9:
-			log(f'warning: beat {beat.id} alignment score {score:.3f}')
+			log(f'warning: beat {beat.id} alignment score {score:.3f}: the take likely skipped or slurred words (see the heard line); take it again with --redo {beat.id}, or reword it')
+		log(f"heard {beat.id}: {heard_report(model, wav, beat.spoken_text)}")
 		if k:
 			current += DEFAULT_GAP if beat.gap_before is None else beat.gap_before
 		elif beat.gap_before is not None:
@@ -1007,7 +1092,8 @@ def synth(video: Path, provider_arg: str | None, force: bool, workers: int) -> d
 	for line in refine(timeline, build / 'narration.wav', ffmpeg):
 		log(f'  {line}')
 	write_json(build / 'timeline.json', timeline)
-	log(f'voice done in {time.time() - t0:.1f}s: {timeline["total"]:.1f}s of narration')
+	last = max((w['b'] for b in timeline['beats'] for w in b['words']), default=0)
+	log(f'voice done in {time.time() - t0:.1f}s: the last word ends at {last:.1f}s (the file without the end card runs {timeline["total"]:.1f}s)')
 	return timeline
 
 
@@ -1063,7 +1149,8 @@ def check_sync(mp4: str, project_path: str) -> int:
 			heard = gate_words(' '.join(s.text for s in segs))
 			said = gate_words(' '.join(w.get('spoken') or w['display'] for w in b['words']))
 			sm = difflib.SequenceMatcher(None, said, heard)
-			miss = [' '.join(said[i1:i2]) + ' => ' + ' '.join(heard[j1:j2]) for tag, i1, i2, j1, j2 in sm.get_opcodes() if tag != 'equal']
+			# Spacing-only differences ("find commit" => "findcommit") are the same speech: left out of the list.
+			miss = [' '.join(said[i1:i2]) + ' => ' + ' '.join(heard[j1:j2]) for tag, i1, i2, j1, j2 in sm.get_opcodes() if tag != 'equal' and ''.join(said[i1:i2]) != ''.join(heard[j1:j2])]
 			# Compare characters without spaces: "S W E" vs "SWE" or "copilot" vs "co pilot" are the same speech.
 			a, h = ''.join(said), ''.join(heard)
 			cm = difflib.SequenceMatcher(None, a, h, autojunk=False)
@@ -1100,13 +1187,25 @@ def write_srt(timeline_path: str, out: str) -> None:
 	def ts(t: float) -> str:
 		return f"{int(t // 3600):02d}:{int(t % 3600 // 60):02d}:{t % 60:06.3f}".replace('.', ',')
 	cues = []
+	ends = re.compile(r'[.!?;:,]["\')\u201d]*$')
 	for b in tl['beats']:
+		ws = b['words']
 		chunk = []
-		for i, w in enumerate(b['words']):
+		size = 9
+		for i, w in enumerate(ws):
+			if not chunk:
+				# A phrase longer than 9 words splits evenly, as on screen (10 words make 5 + 5, not 9 + 1).
+				last = i
+				while last < len(ws) - 1 and not ends.search(ws[last]['display']):
+					last += 1
+				run = last - i + 1
+				size = -(-run // -(-run // 9)) if run > 9 else 9
 			chunk.append(w)
-			if i == len(b['words']) - 1 or len(chunk) >= 9 or re.search(r'[.!?;:,]["\')]*$', w['display']):
+			if i == len(ws) - 1 or len(chunk) >= size or ends.search(w['display']):
 				cues.append((chunk[0]['a'], chunk[-1]['b'] + 0.15, ' '.join(x['display'] for x in chunk)))
 				chunk = []
+	# A cue ends before the next one starts, so no player shows two lines at once.
+	cues = [(a, min(b, cues[n + 1][0] - 0.001) if n + 1 < len(cues) else b, t) for n, (a, b, t) in enumerate(cues)]
 	Path(out).write_text('\n'.join(f'{n}\n{ts(a)} --> {ts(b)}\n{t}\n' for n, (a, b, t) in enumerate(cues, 1)), encoding='utf-8')
 	print(f'{len(cues)} subtitle cues -> {out}')
 
@@ -1127,6 +1226,7 @@ def main(argv: Sequence[str]) -> int:
 	s.add_argument('--provider')
 	s.add_argument('--force', action='store_true')
 	s.add_argument('--workers', type=int, default=6)
+	s.add_argument('--redo', default='', help='comma-separated beat ids to voice again (a fresh take)')
 	c = sub.add_parser('check-sync')
 	c.add_argument('mp4')
 	c.add_argument('project')
@@ -1138,7 +1238,7 @@ def main(argv: Sequence[str]) -> int:
 	m.add_argument('--text', default='Pull request three two five eight oh four: authenticating to a locked Private Marketplace. Five hundred thirty lines added across thirteen files.')
 	args = parser.parse_args(argv)
 	if args.cmd == 'synth':
-		synth(Path(args.video), args.provider, args.force, args.workers)
+		synth(Path(args.video), args.provider, args.force, args.workers, [b for b in args.redo.split(',') if b])
 		return 0
 	if args.cmd == 'check-sync':
 		return check_sync(args.mp4, args.project)

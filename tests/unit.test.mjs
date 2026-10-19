@@ -4,8 +4,8 @@ import assert from 'node:assert/strict';
 import { codeKey, fact, label, quote, ident, path as pathText, code, resolvePart, textOf, walkRefs, formatFact } from '../engine/text.js';
 import { resolvePlaceholders, findPhrase, estimateTimeline, displayTokens } from '../cli/lib/timeline.mjs';
 import { parseDiff } from '../cli/lib/code.mjs';
-import { deriveArea, isTestFile, lengthTier, symbolsFromDiff, testsFromDiff } from '../cli/lib/fetch.mjs';
-import { parsePrRef } from '../cli/lib/common.mjs';
+import { approversOf, deriveArea, isTestFile, lengthTier, prPictures, reviewDiscussion, symbolsFromDiff, testsFromDiff } from '../cli/lib/fetch.mjs';
+import { parsePrRef, voicePace } from '../cli/lib/common.mjs';
 import { defineVideo, defineTreatment, word } from '../engine/scene.js';
 
 const facts = { number: 325804, additions: 1530, authorLogin: 'mcumming', state: 'OPEN', createdAt: '2026-07-14T14:35:26Z', files: [{ path: 'a.ts' }] };
@@ -50,6 +50,18 @@ test('provisional timeline: ordered beats, cues on their words, a tail', () => {
 	assert.ok(tl.total > tl.beats[1].end + 2);
 });
 
+test('the voice pace shortens the words and their pauses, not the gaps between beats', () => {
+	const sb = { beats: [{ id: 'a', say: 'One idea, said in full', cues: {} }, { id: 'b', say: 'Then another one', cues: {} }] };
+	const [own, fast] = [1, 1.1].map(pace => estimateTimeline(sb, facts, { pace }));
+	const spoken = tl => tl.beats.map(b => b.end - b.start);
+	const gap = tl => tl.beats[1].start - tl.beats[0].end;
+	const near = (a, b) => Math.abs(a - b) < 0.005;
+	assert.deepStrictEqual({ words: spoken(own).every((s, i) => near(s, spoken(fast)[i] * 1.1)), gaps: near(gap(own), gap(fast)) }, { words: true, gaps: true });
+	// A recording, or silent captions, keep their own pace; a pace out of range is refused.
+	assert.deepStrictEqual([{ pace: 1.1 }, { pace: 1.1, provider: 'recording' }, {}].map(voice => voicePace({ voice })), [1.1, 1, 1]);
+	assert.throws(() => voicePace({ voice: { pace: 3 } }), /must be between 0.5 and 2/);
+});
+
 test('diff parsing keeps old and new line numbers and the added set', () => {
 	const diff = 'diff --git a/f.ts b/f.ts\n--- a/f.ts\n+++ b/f.ts\n@@ -1,3 +1,4 @@ class A {\n a\n-b\n+B\n+C\n c\n';
 	const files = parseDiff(diff);
@@ -79,6 +91,45 @@ test('areas, tests and the length tier', () => {
 	assert.equal(small.name, 'small');
 	const bumped = lengthTier({ title: 'Authenticate marketplace requests', files: [{ isTest: false, additions: 300, deletions: 20 }], areas: [{}, {}, {}] }, 'token negotiation');
 	assert.equal(bumped.name, 'large');
+	// How it was tested isn't what it does: a sign-in step in the Validation section doesn't make a UI fix sensitive.
+	const tested = lengthTier({ title: 'Polish the dialog', files: [{ isTest: false, additions: 120, deletions: 30 }], areas: [{}] }, 'Tidies the cards.\n\n## Validation\n- Signed in as an authenticated user');
+	assert.equal(tested.name, 'small');
+	// A size only sets how many beats the skeleton starts with: the length is a cap, the same for every size.
+	assert.deepStrictEqual([small, bumped, tested].map(t => Object.keys(t).sort().join() + `:${t.beats}`), ['beats,name,reasons:4', 'beats,name,reasons:6', 'beats,name,reasons:4']);
+});
+
+test('what people said and showed on a PR: approvals, the discussion, the pictures', () => {
+	const user = login => ({ login });
+	const reviews = [
+		{ user: user('ana'), state: 'APPROVED', body: '' },
+		{ user: user('bo'), state: 'CHANGES_REQUESTED', body: 'Please add a test.' },
+		{ user: user('bo'), state: 'APPROVED', body: '' },
+		{ user: user('ana'), state: 'COMMENTED', body: 'One more thought.' },
+		{ user: user('cy'), state: 'APPROVED', body: '' },
+		{ user: user('cy'), state: 'DISMISSED', body: '' },
+	];
+	const long = `Why: ${'x'.repeat(1600)} [comment authored by copilot]`;
+	const comments = [
+		{ user: user('github-actions[bot]'), created_at: '2026-10-14T10:00:00Z', body: '<!-- screenshot-diff-report -->\n## Screenshot Changes\n<details open><summary><code>app/dialog/Light</code></summary>\n\n| Before | After |\n|---|---|\n| ![before](https://shots.example/a) | ![after](https://shots.example/b) |\n</details>' },
+		{ user: user('dee'), created_at: '2026-10-14T11:00:00Z', body: 'Looks like this now: ![the dialog](https://example.com/d.png)' },
+		{ user: user('ana'), created_at: '2026-10-14T12:00:00Z', body: long },
+	];
+	const talk = reviewDiscussion(reviews.map((r, i) => ({ ...r, submitted_at: `2026-10-14T0${i}:00:00Z` })), [], comments);
+	assert.deepEqual({
+		approvers: approversOf(reviews),
+		talk: talk.map(t => `${t.who}: ${t.body.slice(0, 18)}`),
+		kept: talk.at(-1).body.endsWith('[comment authored by copilot]') && talk.at(-1).body.length < 1500,
+		pictures: prPictures('Before: ![old](https://example.com/old.png)', comments, []),
+	}, {
+		approvers: ['ana', 'bo'],
+		talk: ['bo: Please add a test.', 'ana: One more thought.', 'dee: Looks like this no', 'ana: Why: xxxxxxxxxxxxx'],
+		kept: true,
+		pictures: [
+			{ source: 'description', alt: 'old', url: 'https://example.com/old.png' },
+			{ source: 'ci', name: 'app/dialog/Light', before: 'https://shots.example/a', after: 'https://shots.example/b' },
+			{ source: 'comment', who: 'dee', alt: 'the dialog', url: 'https://example.com/d.png' },
+		],
+	});
 });
 
 test('PR references in every accepted form', () => {

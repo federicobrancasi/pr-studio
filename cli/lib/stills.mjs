@@ -15,8 +15,9 @@ export function keyTimes(project) {
 	};
 	project.beats.forEach((b, k) => {
 		add(k === 0 ? 0 : b.start + 0.6, `${b.id} start`);
+		// Just after the cue, but never past the beat's own last moment (into the fade to the next beat or the end card).
 		for (const [name, at] of Object.entries(b.cues)) {
-			add(at + 0.9, `${b.id} \u00b7 ${name}`);
+			add(Math.min(at + 0.9, b.end - 0.15), `${b.id} \u00b7 ${name}`);
 		}
 		add(b.end - 0.15, `${b.id} end`);
 	});
@@ -38,13 +39,26 @@ export async function contactSheet(browser, dir, images, out, { cols = 3, width 
 	fs.rmSync(file);
 }
 
-export async function stills(slug, { at = null, beat = null, scale = 1 } = {}) {
+export async function stills(slug, { at = null, beat = null, ends = false, scale = 1 } = {}) {
 	const bdir = buildDir(slug);
 	const project = readJson(path.join(bdir, 'project.json'));
-	const dir = path.join(bdir, 'stills');
-	fs.rmSync(dir, { recursive: true, force: true });
+	// --ends: one frame per beat at its fullest moment, half a second before it ends (for a review at full size).
+	if (ends) {
+		at = project.beats.map(b => +(b.end - 0.5).toFixed(2));
+	}
+	// A beat or a few times go into their own folder, so the full contact sheet (the one a reviewer reads) stays whole.
+	const dir = at || beat ? path.join(bdir, 'stills', beat ? `beat-${beat}` : 'at') : path.join(bdir, 'stills');
+	if (at || beat) {
+		fs.rmSync(dir, { recursive: true, force: true });
+	} else {
+		for (const f of fs.existsSync(dir) ? fs.readdirSync(dir) : []) {
+			if (f.endsWith('.png') || f.startsWith('.')) {
+				fs.rmSync(path.join(dir, f), { force: true });
+			}
+		}
+	}
 	fs.mkdirSync(dir, { recursive: true });
-	let list = at ? at.map(t => ({ t, why: `t=${t}` })) : keyTimes(project);
+	let list = at ? at.map((t, k) => ({ t, why: ends ? `${project.beats[k].id} end` : `t=${t}` })) : keyTimes(project);
 	if (beat) {
 		const b = project.beats.find(x => x.id === beat);
 		if (!b) {

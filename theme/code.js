@@ -228,6 +228,8 @@ export function diffPanel(parent, hunk, { x, y, w, h, revealAt, fontSize = 19, s
 	const adds = hunk.lines.filter(l => l.type === '+').length, dels = hunk.lines.filter(l => l.type === '-').length;
 	txt(head, `+${adds}`, 'st-mono', { fontSize: 18, color: C.green, fontWeight: 600, flex: 'none' });
 	txt(head, `\u2212${dels}`, 'st-mono', { fontSize: 18, color: C.red, fontWeight: 600, flex: 'none' });
+	// The counts are of the lines shown, not the whole file: say so, or a slice reads like the file's totals.
+	txt(head, 'in these lines', '', { fontSize: 16, color: C.muted, whiteSpace: 'nowrap', flex: 'none' });
 	const cut = dedent(hunk.lines);
 	const gutter = 108;
 	const size = pickFont(Math.max(...hunk.lines.map(l => l.text.length - cut)), w - gutter - 40, fontSize);

@@ -205,10 +205,36 @@ has a still and the parameters of each.
 
 ![The catalog: a different diagram for each kind of explanation](docs/media/catalog.png)
 
+## Slides
+
+The same look as a slide deck: ask **"Make a presentation about …"** (a PR, a feature, a doc) and the `presentation`
+skill writes the slides as plain data in `decks/<slug>/deck.mjs`; `prs deck build` turns them into a 16:9 PDF with a PNG
+per page, a contact sheet, speaker notes with every source, and a checks report (overflow, overlap, the safe area,
+more than 25 words on a slide, numbers without a source, the same layout twice in a row, soft shadows that PDF viewers
+draw as gray boxes). A slide with `clicks` becomes one page per click. 57 layouts and diagrams, one slide of each in
+[`deck/samples/`](deck/samples/deck.mjs):
+
+![The layout samples: one slide per layout](.claude/skills/presentation/samples.png)
+
 ## Commands
 
 `node cli/prs.mjs help` lists them: `doctor`, `triage`, `summary`, `new`, `check`, `voice`, `direct`, `prepare`,
-`stills`, `lint`, `draft`, `render`, `publish`, `concepts`, `catalog`, `history`, `gallery`, `report`, `smoke`.
+`stills`, `lint`, `draft`, `render`, `publish`, `concepts`, `catalog`, `history`, `gallery`, `report`, `smoke`, and
+`deck new | build | samples | list` for slides.
+
+## The VS Code plugin
+
+The `pr-studio` plugin of the VS Code team kit (`/pr-studio:generate-video <PR>` and `/pr-studio:generate-presentation
+<PR>` in chat) runs this engine. Change it here, run `npm test`, then rebuild the plugin's generated files:
+
+```sh
+npm run plugin -- ../vscode-team-kit/pr-studio
+```
+
+That writes the plugin's `scripts/engine.pack` (every engine file, whole: without the tests, the docs, and what only
+this repository needs, i.e. Slack, the changelog and the gallery), `scripts/setup.mjs` (from `plugin/setup.mjs`, which
+unpacks it into `~/.cache/pr-studio/engine/<hash>/`), the catalog picture with its `catalog.md`, and the layout samples
+picture. The skills' own text is written in the plugin.
 
 ## License
 

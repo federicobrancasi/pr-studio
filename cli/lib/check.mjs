@@ -1,6 +1,6 @@
-// prs check: is the storyboard ready for the voice? Length window, needs, cues, placeholders, evidence, pronunciation.
+// prs check: is the storyboard ready for the voice? Length cap, needs, cues, placeholders, evidence, pronunciation.
 import path from 'node:path';
-import { readJson, videoDir } from './common.mjs';
+import { CAP, readJson, videoDir, voicePace } from './common.mjs';
 import { displayTokens, estimateTimeline, findPhrase, cueSpec } from './timeline.mjs';
 import { checkEvidence } from './evidence.mjs';
 import { NEEDS } from '../../engine/scene.js';
@@ -45,6 +45,16 @@ export async function checkStory(slug) {
 			}
 		}
 		const pron = Object.keys(sb.pronounce ?? {});
+		if (b.need === 'title' || b.need === 'status') {
+			const sentences = tokens.filter(t => /[.!?]["')\u201d]*$/.test(t)).length;
+			if (sentences > 1) {
+				warnings.push(`beat ${b.id}: ${sentences} sentences; the ${b.need} beat says one, the screen carries the rest`);
+			}
+		}
+		const shown = b.need === 'title' ? [...b.say.matchAll(/\{\{facts\.(number|additions|deletions|changedFiles|commitCount|authorName|authorLogin)\b/g)].map(m => m[1]) : [];
+		if (shown.length) {
+			warnings.push(`beat ${b.id}: the title card shows ${[...new Set(shown)].join(', ')}: say what the PR does instead`);
+		}
 		const odd = [...new Set(tokens.map(t => t.replace(/^[^\w]+|[^\w]+$/g, '')).filter(t => SPEAKABLE_HINT.test(t) && !pron.some(p => p.split(/\s+/).includes(t))))];
 		if (odd.length) {
 			warnings.push(`beat ${b.id}: check how these are spoken (add to "pronounce" if needed): ${odd.join(', ')}`);
@@ -72,16 +82,15 @@ export async function checkStory(slug) {
 	}
 	let seconds = null;
 	if (!errors.length) {
-		seconds = estimateTimeline(sb, facts).total;
-		const [lo, hi] = sb.length?.seconds ?? pr.tier?.seconds ?? [40, 100];
+		// Where the last word should end, as prs voice measures it (not the file's length, which adds the end card).
+		const estimate = estimateTimeline(sb, facts, { pace: voicePace() });
+		seconds = estimate.beats.at(-1)?.end ?? estimate.total;
 		const words = sb.beats.reduce((a, b) => a + displayTokens(b.say, facts).length, 0);
-		const msg = `about ${Math.round(seconds)} s (${words} words) for a ${lo}-${hi} s target`;
-		if (seconds > hi + 12 || seconds < lo - 10) {
-			errors.push(`${msg}: ${seconds > hi ? 'cut' : 'add'} narration`);
-		} else if (seconds > hi + 4 || seconds < lo - 4) {
-			warnings.push(msg);
+		const msg = `the last word should end at about ${Math.round(seconds)} s (${words} words; an estimate: prs voice measures it)`;
+		if (seconds > CAP.seconds) {
+			errors.push(`${msg}, past the ${CAP.seconds} s cap (${CAP.fileSeconds} s with the end card): cut what answers none of the six questions, and what the screen already shows`);
 		} else {
-			console.log(`length: ${msg}`);
+			console.log(`length: ${msg}, within the ${CAP.seconds} s cap`);
 		}
 	}
 	for (const w of warnings) {

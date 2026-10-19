@@ -40,3 +40,18 @@ export async function encode(slug, { draft = false, out }) {
 	await run(findFfmpeg(), args, { maxBuffer: 16 * 1024 * 1024 });
 	return { out, hasAudio };
 }
+
+/**
+ * The same video as WebM (VP9 and Opus) for VS Code's chat, whose window can't decode MP4. Best effort: an ffmpeg
+ * without these encoders only costs the preview, and the mp4 is delivered as usual. Returns whether it was written.
+ */
+export async function encodeWebm(mp4, webm) {
+	try {
+		await run(findFfmpeg(), ['-v', 'error', '-y', '-i', mp4, '-c:v', 'libvpx-vp9', '-pix_fmt', 'yuv420p', '-crf', '30', '-b:v', '0', '-deadline', 'good', '-cpu-used', '4', '-row-mt', '1', '-c:a', 'libopus', '-b:a', '96k', webm], { maxBuffer: 16 * 1024 * 1024 });
+		return true;
+	} catch (e) {
+		fs.rmSync(webm, { force: true });
+		console.warn(`no WebM for VS Code's chat preview (${String(e.message).split('\n')[0]}); the mp4 is delivered as usual`);
+		return false;
+	}
+}

@@ -37,7 +37,7 @@ export const checklist = defineTreatment({
 	params: {
 		eyebrow: 'label', title: 'label',
 		items: '[{ icon, tone, title, sub, at }]  (2-5)',
-		read: '{ label, refs: [{ code: code(file, { anchor }), title, what, at }] }  (optional, 1-3)',
+		read: '{ label, refs: [{ code: code(file, { anchor }), title, what, at }] }  (optional, 1-3; without at, all the refs light up together a quarter of the way into the beat)',
 	},
 	demo: () => ({
 		eyebrow: label('Scope and status'), title: label('What to know before reviewing'),
@@ -61,12 +61,15 @@ export const checklist = defineTreatment({
 			const line = k < items.length - 1 ? el('div', 'st-abs', root, { left: 96 + 90, top: 248 + k * rowH + rowH - 7, width: width - 90, height: 1.5, background: C.line, transformOrigin: '0 50%' }) : null;
 			return { row, line };
 		});
-		const itemAt = spread(ctx, items, { lead: 0.3, tail: hasRead ? ctx.beat.duration * 0.45 : 1.5 });
+		const itemAt = spread(ctx, items, { lead: 0.3, tail: hasRead ? ctx.beat.duration * 0.6 : 1.5 });
 		let read = null;
 		if (hasRead) {
 			const box = tile(root, 'neutral', { left: 1080, top: 248, width: 744, height: 452, padding: '32px 36px' });
 			const refs = readRefs(box, p.read, ctx, { width: 744 - 72 });
-			const refAt = spread(ctx, refs, { lead: ctx.beat.duration * 0.6, tail: 1 });
+			// Where to start reading is often said only on screen, in a short closing beat: every place comes forward early,
+			// together, and stays, so a viewer can read them all once.
+			const together = ctx.beat.start + ctx.beat.duration * 0.25;
+			const refAt = refs.map(r => (r.at !== undefined && r.at !== null ? ctx.at(r.at) : together));
 			read = { box, refs, refAt };
 		}
 		return { h: wrapH, rows, itemAt, read };
@@ -100,7 +103,7 @@ export const board = defineTreatment({
 	id: 'status.board',
 	need: 'status',
 	name: 'Now, next, later',
-	when: 'The closing beat when the PR is one step of a larger plan: what lands now, what follows, what is open.',
+	when: 'The closing beat when the PR is one step of a larger plan: what lands now, what follows, what is open. Text only: for places to start reading (code references), use status.checklist.',
 	params: { eyebrow: 'label', title: 'label', columns: '[{ title, tone, icon, items: [{ text, sub, at }] }]  (2-3 columns, 1-4 items each)' },
 	demo: () => ({
 		eyebrow: label('Status'), title: label('Where this leaves us'),

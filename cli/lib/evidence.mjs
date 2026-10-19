@@ -1,8 +1,10 @@
 // Evidence for storyboard claims, checked against the PR. Accepted forms:
-//   { file, anchor }               the anchor (text or regex) is in the file at the head commit
+//   { file, anchor }               the anchor (text or regex) is in the file at the head commit (any file of the
+//                                  repository, changed or not: behaviour that lives outside the diff)
 //   { file, anchor, removed: true } the anchor is on a line this PR removes (pr.diff)
 //   { body: "exact text" }          an exact quote of the PR description (Markdown markers ignored)
 //   { commit: "exact text" }        part of a commit message
+//   { review: "exact text" }        words from the review discussion (reviews, comments on lines, the conversation)
 //   { fact: "additions" }           a value in pr.json facts (also "facts.additions")
 //   { file, status }                the PR changes that file
 import fs from 'node:fs';
@@ -23,6 +25,11 @@ export function stripMarkdown(text) {
 
 export function bodyCorpus(pr) {
 	return `${norm(pr.body ?? '')}\n${norm(stripMarkdown(pr.body ?? ''))}`;
+}
+
+/** What people said in review, as plain text (Markdown markers ignored). */
+export function reviewCorpus(pr) {
+	return (pr.discussion ?? []).map(d => `${norm(d.body)}\n${norm(stripMarkdown(d.body))}`).join('\n');
 }
 
 export function removedLines(slug, file) {
@@ -65,11 +72,14 @@ export function checkEvidence(slug, pr, ev) {
 	if (ev.body !== undefined) {
 		return bodyCorpus(pr).includes(norm(stripMarkdown(ev.body))) ? null : `body quote not found in the PR description: "${ev.body}"`;
 	}
+	if (ev.review !== undefined) {
+		return reviewCorpus(pr).includes(norm(stripMarkdown(ev.review))) ? null : `not in the review discussion (brief.md, "Review discussion"): "${ev.review}"`;
+	}
 	if (ev.commit !== undefined) {
 		return (pr.facts.commits ?? []).some(c => norm(c.message ?? c.headline).includes(norm(ev.commit))) ? null : `no commit message contains "${ev.commit}"`;
 	}
 	if (!ev.file) {
-		return 'evidence needs { file, anchor }, { file, anchor, removed: true }, { body } or { commit }';
+		return 'evidence needs { file, anchor }, { file, anchor, removed: true }, { body }, { commit } or { review }';
 	}
 	if (/^(brief\.md|pr\.json|pr\.diff|storyboard\.json)$/.test(ev.file)) {
 		return `"${ev.file}" is a pr-studio file, not part of the PR: cite the repository file, or use { body: "exact quote" } for the PR description`;

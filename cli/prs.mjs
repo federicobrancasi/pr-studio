@@ -1,32 +1,40 @@
 #!/usr/bin/env node
 // prs: make an explainer video for a pull request. Run `prs help` (or node cli/prs.mjs help).
-import { guardOffline, resolveSlug, timed } from './lib/common.mjs';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { CAP, guardOffline, resolveSlug, timed } from './lib/common.mjs';
 
 const HELP = `prs: pull request explainer videos
 
-  prs doctor                         check and install what the pipeline needs (voice model, ffmpeg, browser)
-  prs changelog [--run id | file]    the videos for the top 5 of today's #changelog (report from vscode-engineering)
-  prs prompt <PR>                    the prompt for a run nobody watches (a GitHub Actions job) to make that PR's video
-  prs triage <PRs...> | --file f     which PRs get a video, which are faster to read (--cap n for a changelog)
-  prs summary [triage.json]          the closing Slack message for a triage run
-  prs budget                         minutes left in this cloud session (start a video only with 20 or more)
-  prs prefetch [--text "..."]        cache the PRs named in a cloud session's request (its setup steps run this)
+  prs doctor [--deck]                check and install what the pipeline needs (browser; for videos also voice, ffmpeg)
   prs new <PR URL | owner/repo#n>    fetch the PR and the files it changes into videos/<slug>/ (brief.md, storyboard skeleton)
-  prs check [slug]                   check the storyboard: length window, cues, placeholders, evidence anchors
-  prs voice [slug] [--provider p]    narration + word timing (providers: auto, mai, kokoro, recording, silent)
-  prs direct [slug] [--seed n]       pick the diagram treatments and motion for each beat; scaffold scenes.js
+  prs check [slug]                   check the storyboard: the length cap, cues, placeholders, evidence anchors
+  prs file <slug> <path> [--base]    print any file of the repository at the PR's head commit (--base: before the PR)
+  prs voice [slug] [--provider p] [--redo beat,...]  narration + word timing; --redo voices those beats again (a fresh take)
+  prs direct [slug] [--fresh]        pick the diagram treatments and motion for each beat (a re-run keeps the picks); scaffold scenes.js
   prs prepare [slug]                 verify every on-screen text and code reference; build the video page
-  prs stills [slug] [--beat id] [--at t1,t2]   key frames + contact sheet in build/stills/
+  prs stills [slug] [--beat id] [--at t1,t2] [--ends]   key frames + contact sheet in build/stills/; --ends: one frame per beat, at its fullest
   prs lint [slug] [--every 0.5]      layout, text provenance, caption band, novelty, QR
   prs draft [slug]                   quick half-size preview mp4
   prs render [slug]                  final frames (cached; unchanged frames are reused)
-  prs publish [slug]                 encode, captions file, sync gate, deliver, add to the gallery
+  prs publish [slug]                 encode, captions file, sync gate, deliver, add to the history
   prs concepts [slug]                render the options in scenes.js \`concepts\` side by side
-  prs catalog [--stills]             list the treatments (and render their catalog stills)
-  prs history [--collect]            what recent videos used; --collect merges the cloud sessions' (copilot/* branches)
-  prs gallery [--upload]             rebuild the README gallery (previews; --upload puts the videos in the release)
+  prs catalog [--stills | --sheet f] list the treatments (and render their stills, or all on one numbered picture)
+  prs catalog --icons                the icon names a treatment's icon fields take
+  prs history [--last n]             what recent videos used (the next one is picked to look different)
   prs report [slug]                  where the time went
   prs smoke [--provider p]           make a short demo video end to end with timings (checks this machine)
+
+Slides (the presentation skill):
+  prs deck new --pr <PR> [slug]         start a deck about a PR: fetches it, fills the title card and the status (with its QR code)
+  prs deck new <slug> [--title "..."]   start a deck on any topic in decks/<slug>/ (deck.mjs: the slides as plain data)
+  prs deck build [slug] [--no-deliver]  PDF, one PNG per page, contact sheet, notes, checks; deliver to ~/Downloads/pr-decks/
+  prs deck grid <slug> <assets/x.png> [--vs <assets/y.png>]
+                                        the picture with a grid of its pixels, to read crop, pin and ring positions;
+                                        --vs: where a before and an after of the same screen differ
+  prs deck samples                      build the layout samples: one slide per layout, to pick from
+  prs deck list                         the decks in decks/
 
 PRS_OFFLINE=1: no network (an agent sandbox): run prs new before, then everything works from what it downloaded.
 `;
@@ -56,6 +64,21 @@ async function main() {
 	const [cmd, ...rest] = process.argv.slice(2);
 	const args = parseArgs(rest);
 	const slugArg = () => resolveSlug(args._[0]);
+	// The repository's own commands (changelog, Slack requests, the gallery): the plugin's copy has no repo.mjs.
+	if (fs.existsSync(fileURLToPath(new URL('./repo.mjs', import.meta.url)))) {
+		const repo = await import('./repo.mjs');
+		if (repo.REPO_COMMANDS.has(cmd)) {
+			await repo.repoCommand(cmd, args);
+			return;
+		}
+		if (cmd === 'history' && args.collect) {
+			await repo.collectSessions();
+		}
+		if ([undefined, 'help', '--help'].includes(cmd)) {
+			console.log(`${HELP}\nIn the repository:\n${repo.REPO_HELP}`);
+			return;
+		}
+	}
 	switch (cmd) {
 		case undefined:
 		case 'help':
@@ -67,56 +90,11 @@ async function main() {
 			process.exitCode = (await doctor(args)) ? 0 : 1;
 			return;
 		}
-		case 'changelog': {
-			const { changelog, printChangelog } = await import('./lib/changelog.mjs');
-			const plan = await timed(null, 'changelog', () => changelog({ file: args._[0] ?? null, run: args.run ?? null }));
-			printChangelog(plan);
-			return;
-		}
-		case 'prompt': {
-			const { prompt } = await import('./lib/prompt.mjs');
-			console.log(prompt(args._[0], { repo: args.repo ?? 'microsoft/vscode' }));
-			return;
-		}
-		case 'triage': {
-			const { triage, printTriage } = await import('./lib/triage.mjs');
-			const result = await timed(null, 'triage', () => triage(args._, { file: args.file ?? null, cap: args.cap ? Number(args.cap) : null, repo: args.repo ?? 'microsoft/vscode' }));
-			printTriage(result);
-			return;
-		}
-		case 'budget': {
-			const { minutesLeft } = await import('./lib/triage.mjs');
-			const left = minutesLeft();
-			console.log(left === null ? 'no session clock: not a cloud session, and no /tmp/prs-start' : `${left} minutes left in this session`);
-			return;
-		}
-		case 'prefetch': {
-			const { prefetch } = await import('./lib/prefetch.mjs');
-			await prefetch({ text: typeof args.text === 'string' ? args.text : null, repo: args.repo ?? 'microsoft/vscode' });
-			return;
-		}
-		case 'summary': {
-			const { summary } = await import('./lib/triage.mjs');
-			const fs = await import('node:fs');
-			const path = await import('node:path');
-			const { ROOT } = await import('./lib/common.mjs');
-			let file = args._[0];
-			if (!file) {
-				const dir = path.join(ROOT, 'videos', '_triage');
-				const all = fs.existsSync(dir) ? fs.readdirSync(dir).filter(f => f.endsWith('.json')).map(f => path.join(dir, f)).sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs) : [];
-				file = all[0];
-				if (!file) {
-					throw new Error('No triage yet: run prs triage first');
-				}
-			}
-			console.log(summary(file));
-			return;
-		}
 		case 'new': {
 			const { newVideo } = await import('./lib/fetch.mjs');
 			const { ref, data, code, reused } = await timed(null, 'new', () => newVideo(args._[0], args._[1], { force: !!args.force }));
 			console.log(`videos/${ref.slug}: ${data.facts.title}${reused ? ' (downloaded before this run: offline)' : ''}`);
-			console.log(`  +${data.facts.additions} \u2212${data.facts.deletions} in ${data.facts.changedFiles} files \u00b7 head ${data.facts.headSha9} \u00b7 ${data.tier.name}: ${data.tier.seconds[0]}-${data.tier.seconds[1]} s, ${data.tier.beats} beats`);
+			console.log(`  +${data.facts.additions} \u2212${data.facts.deletions} in ${data.facts.changedFiles} files \u00b7 head ${data.facts.headSha9} \u00b7 ${data.tier.name}: ${data.tier.beats} beats to start from, at most ${CAP.fileSeconds} s`);
 			if (code) {
 				console.log(`  code: ${code.saved} of the ${data.facts.files.length} changed files saved at the head commit${code.failed.length ? ` (not downloaded: ${code.failed.map(f => f.path).join(', ')})` : ''}`);
 			}
@@ -133,13 +111,31 @@ async function main() {
 		case 'voice': {
 			const slug = slugArg();
 			const { voice } = await import('./lib/voice.mjs');
-			await timed(slug, 'voice', () => voice(slug, { provider: args.provider, force: !!args.force, recording: args.recording }));
+			await timed(slug, 'voice', () => voice(slug, { provider: args.provider, force: !!args.force, redo: typeof args.redo === 'string' ? args.redo : undefined, recording: args.recording }));
 			return;
 		}
 		case 'direct': {
 			const slug = slugArg();
 			const { direct } = await import('./lib/direct.mjs');
-			await timed(slug, 'direct', () => direct(slug, { seed: args.seed, motion: args.motion, use: args.use, reason: args.reason, force: !!args.force }));
+			await timed(slug, 'direct', () => direct(slug, { seed: args.seed, motion: args.motion, use: args.use, reason: args.reason, force: !!args.force, fresh: !!args.fresh }));
+			return;
+		}
+		case 'file': {
+			// Any file of the repository at the PR's head commit (or --base, before the PR), for behaviour outside the diff.
+			const slug = resolveSlug(args._[0]);
+			const file = args._[1];
+			if (!file) {
+				throw new Error('Usage: prs file <slug> <path in the repository> [--base]');
+			}
+			const { readJson, videoDir } = await import('./lib/common.mjs');
+			const { facts } = readJson(path.join(videoDir(slug), 'pr.json'));
+			if (args.base) {
+				const { fileAt } = await import('./lib/github.mjs');
+				process.stdout.write(await fileAt(facts.repo, facts.baseSha, file));
+			} else {
+				const { fileAtHead } = await import('./lib/code.mjs');
+				process.stdout.write(fileAtHead(slug, facts, file));
+			}
 			return;
 		}
 		case 'prepare': {
@@ -154,7 +150,7 @@ async function main() {
 			const { stills } = await import('./lib/stills.mjs');
 			await timed(slug, 'prepare', () => prepare(slug));
 			const at = args.at ? String(args.at).split(',').map(Number) : null;
-			const out = await timed(slug, 'stills', () => stills(slug, { at, beat: args.beat }));
+			const out = await timed(slug, 'stills', () => stills(slug, { at, beat: args.beat, ends: !!args.ends }));
 			console.log(`${out.images.length} stills in ${out.dir}\ncontact sheet: ${out.sheet}`);
 			return;
 		}
@@ -190,20 +186,11 @@ async function main() {
 		}
 		case 'catalog': {
 			const { catalog } = await import('./lib/catalog.mjs');
-			await catalog({ stills: !!args.stills, only: args.only });
-			return;
-		}
-		case 'gallery': {
-			const { gallery } = await import('./lib/gallery.mjs');
-			await gallery({ upload: !!args.upload });
+			await catalog({ stills: !!args.stills, only: args.only, sheet: typeof args.sheet === 'string' ? args.sheet : null, icons: !!args.icons });
 			return;
 		}
 		case 'history': {
-			const { collectHistory, printHistory } = await import('./lib/history.mjs');
-			if (args.collect) {
-				const r = collectHistory();
-				console.log(`history: ${r.total} videos, ${r.added} new from ${r.branches} session branch${r.branches === 1 ? '' : 'es'}`);
-			}
+			const { printHistory } = await import('./lib/history.mjs');
 			printHistory(Number(args.last ?? 8));
 			return;
 		}
@@ -211,6 +198,11 @@ async function main() {
 			const { smoke } = await import('./lib/smoke.mjs');
 			const { ok } = await smoke({ provider: args.provider });
 			process.exitCode = ok ? 0 : 1;
+			return;
+		}
+		case 'deck': {
+			const { deckCommand } = await import('./lib/deck.mjs');
+			process.exitCode = await deckCommand(args);
 			return;
 		}
 		case 'report': {

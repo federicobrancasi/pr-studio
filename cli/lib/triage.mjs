@@ -11,7 +11,8 @@ import { fetchPrMeta, isTestFile, lengthTier, summarizeFiles } from './fetch.mjs
 const GENERATED = /(^|\/)(policyData\.jsonc|package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|cglicenses\.json|cgmanifest\.json|ThirdPartyNotices\.txt)$|\.snap$|\.(png|jpe?g|gif|ico|woff2?|ttf|mp4|webm)$/i;
 const DOCS = /\.(md|mdx|rst)$|(^|\/)docs?\//i;
 const MECHANICAL = /^(revert\b|bump\b|update distro\b|update (dependency|dependencies|electron|node(js)?|version)\b|chore\(deps\)|merge (branch|remote-tracking))/i;
-const SECONDS = { small: 48, medium: 70, large: 92 };
+/** About how long a video of each size runs, for planning a batch (measured on short videos: small 37 s, medium 38-51 s). */
+export const SECONDS = { small: 40, medium: 50, large: 65 };
 
 export const isSourceFile = p => !isTestFile(p) && !DOCS.test(p) && !GENERATED.test(p);
 

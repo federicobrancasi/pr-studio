@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import * as esbuild from 'esbuild';
-import { ROOT, buildDir, readJson, sha256, sha256File, storyboardVoiceHash, videoDir, writeJson } from './common.mjs';
+import { ROOT, buildDir, readJson, sha256, sha256File, storyboardVoiceHash, videoDir, voicePace, writeJson } from './common.mjs';
 import { estimateTimeline } from './timeline.mjs';
 import { parseDiff, resolveCode, fileAtHead } from './code.mjs';
 import { checkEvidence, stripMarkdown } from './evidence.mjs';
@@ -33,7 +33,7 @@ export function prCorpus(slug, pr) {
 	const f = pr.facts;
 	return {
 		diff,
-		quote: norm([f.title, pr.body ?? '', stripMarkdown(pr.body ?? ''), ...(f.commits ?? []).map(c => c.message ?? c.headline), diffText, ...(f.linkedIssues ?? []).map(i => i.title), ...(pr.tests ?? []).flatMap(t => t.names)].join('\n')),
+		quote: norm([f.title, pr.body ?? '', stripMarkdown(pr.body ?? ''), ...(f.commits ?? []).map(c => c.message ?? c.headline), diffText, ...(f.linkedIssues ?? []).map(i => i.title), ...(pr.tests ?? []).flatMap(t => t.names), ...(pr.discussion ?? []).flatMap(d => [d.body, stripMarkdown(d.body)])].join('\n')),
 		idents: [diffText, f.files.map(x => x.path).join('\n'), pr.body ?? ''].join('\n'),
 		paths: f.files.map(x => x.path),
 	};
@@ -49,7 +49,7 @@ function verifyText(ref, corpus, facts, codeTexts) {
 		case 'fact':
 			return getPath(facts, ref.path) === undefined ? `fact('${ref.path}') is not in pr.json facts` : false;
 		case 'quote':
-			return corpus.quote.includes(norm(ref.text)) ? false : `quote("${ref.text}") is not in the PR (title, body, commits, diff or tests). Quote exactly or use label()`;
+			return corpus.quote.includes(norm(ref.text)) ? false : `quote("${ref.text}") is not in the PR (title, body, commits, diff, tests or review discussion). Quote exactly or use label()`;
 		case 'ident': {
 			const bare = ref.text.replace(/\(\)$/, '').replace(/^[.#@]/, '');
 			if (corpus.idents.includes(bare) || codeTexts.some(t => t.includes(bare)) || corpus.inChangedFiles(bare)) {
@@ -73,7 +73,7 @@ export async function prepare(slug, { quiet = false } = {}) {
 	const storyboard = readJson(path.join(vdir, 'storyboard.json'));
 	const facts = pr.facts;
 	const real = fs.existsSync(path.join(bdir, 'timeline.json'));
-	const timeline = real ? readJson(path.join(bdir, 'timeline.json')) : estimateTimeline(storyboard, facts);
+	const timeline = real ? readJson(path.join(bdir, 'timeline.json')) : estimateTimeline(storyboard, facts, { pace: voicePace() });
 	if (real) {
 		const voiced = readJson(path.join(bdir, 'voice.json'));
 		if (voiced.storyboard !== storyboardVoiceHash(storyboard)) {

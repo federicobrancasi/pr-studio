@@ -11,11 +11,12 @@ export const split = defineTreatment({
 	id: 'compare.split',
 	need: 'compare',
 	name: 'Before and after',
-	when: 'Behavior that differs on 2-5 aspects (what the user sees, what is sent, what is cached).',
+	when: 'Behavior that differs on 2-5 aspects (what the user sees, what is sent, what is cached). The narration names the aspects in order, a sentence each, and each row lands on its word; or it tells the old way first and turns on "Now" (afterAt: the whole new column then).',
 	params: {
 		eyebrow: 'label', title: 'label',
 		before: '{ title, icon }', after: '{ title, icon }',
-		rows: '[{ aspect, before, after, changed (default true), mono, at }]  (1-5)',
+		rows: '[{ aspect, before, after, changed (default true), mono, at, afterAt }]  (1-5; mono is for the whole row)',
+		afterAt: 'time the new column appears, row after row (optional: by default each row\'s new side follows its old one)',
 		takeaway: '{ text, tone, at }  (optional)',
 	},
 	demo: () => ({
@@ -49,7 +50,7 @@ export const split = defineTreatment({
 				icon(a, 'arrowRight', 22, C.green);
 			}
 			txt(a, r.after, r.mono ? 'st-mono' : '', { fontSize: r.mono ? 21 : 23, fontWeight: changed ? 600 : 400, color: changed ? C.green : C.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' });
-			return { aspect, b, a, changed };
+			return { aspect, b, a, changed, afterAt: r.afterAt !== undefined ? ctx.at(r.afterAt) : null };
 		});
 		let take = null;
 		if (p.takeaway) {
@@ -58,18 +59,24 @@ export const split = defineTreatment({
 			icon(take, 'check', 28, TONE[tone].fg);
 			txt(take, p.takeaway.text, '', { fontSize: 25, fontWeight: 600, color: C.ink, whiteSpace: 'nowrap' });
 		}
-		return { h, headB, headA, rowEls, take, times: spread(ctx, rows, { lead: 1.2, tail: p.takeaway ? 2.6 : 1.2 }), takeAt: p.takeaway ? ctx.at(p.takeaway.at, Math.max(1, ctx.beat.duration - 2)) : 0 };
+		const times = spread(ctx, rows, { lead: 1.2, tail: p.takeaway ? 2.6 : 1.2 });
+		// When the new side shows: the row's own afterAt, else the column's (row after row), else just after its old side.
+		const column = p.afterAt !== undefined ? ctx.at(p.afterAt) : null;
+		const afterTimes = rowEls.map((r, k) => r.afterAt ?? (column !== null ? column + k * 0.3 : times[k] + 0.35));
+		// Without its own time, the takeaway comes after the last row, never before it.
+		const takeAt = !p.takeaway ? 0 : p.takeaway.at !== undefined ? ctx.at(p.takeaway.at) : Math.max(ctx.at(undefined, Math.max(1, ctx.beat.duration - 2)), Math.max(...times, ...afterTimes) + 0.8);
+		return { h, headB, headA, rowEls, take, times, afterTimes, takeAt, headAt: column !== null ? column - 0.25 : ctx.beat.start + 0.55 };
 	},
 	render(i, t, ctx) {
 		const s = ctx.beat.start;
 		i.h.render(t);
 		enter(i.headB, t, s + 0.4, { dy: 10 });
-		enter(i.headA, t, s + 0.55, { dy: 10 });
+		enter(i.headA, t, i.headAt, { dy: 10 });
 		i.rowEls.forEach((r, k) => {
 			const at = i.times[k];
 			enter(r.aspect, t, at - 0.3, { dx: -10, dy: 0 });
 			enter(r.b, t, at - 0.2, { dy: 8 });
-			const q = enter(r.a, t, at + 0.35, { dx: -16, dy: 0 });
+			const q = enter(r.a, t, i.afterTimes[k], { dx: -16, dy: 0 });
 			r.a.style.background = r.changed && q > 0.5 ? C.greenTint : '#fff';
 			r.a.style.borderColor = r.changed && q > 0.5 ? 'transparent' : C.line;
 		});
@@ -101,10 +108,10 @@ export const wipe = defineTreatment({
 	id: 'compare.wipe',
 	need: 'compare',
 	name: 'Wipe reveal',
-	when: 'One screen, list or result that looks different after the change; the viewer sees it flip in place.',
+	when: 'One screen, list or result that looks different after the change; the viewer sees it flip in place. The narration says what it was, then what it is now: the wipe lands on the word that turns ("Now"). The whole panel turns at once, and its items flip in place: give before and after the same rows in the same order.',
 	params: {
 		eyebrow: 'label', title: 'label',
-		before: '{ title, icon, items: [{ icon, text, tone, mono }] }  (2-5 items)',
+		before: '{ title, icon, items: [{ icon, text, tone, mono }] }  (2-6 items)',
 		after: '{ title, icon, items: [...] }',
 		at: 'time of the wipe', note: '{ before, after }  (labels under the panel)',
 	},
@@ -126,6 +133,8 @@ export const wipe = defineTreatment({
 		after.dataset.exclusive = 'wipe:after';
 		const line = el('div', 'st-abs', root, { left: x, top: y - 14, width: 4, height: hh + 28, borderRadius: 2, background: C.blue });
 		const handle = el('div', 'st-abs', root, { left: x - 60, top: y + hh / 2 - 17, width: 120, display: 'flex', justifyContent: 'center' });
+		// It sweeps across the rows on purpose: a moving part, which the overlap check leaves alone.
+		handle.dataset.flight = 'wipe';
 		pill(handle, { tone: 'blue', text: label('after'), solid: true, size: 's' });
 		const tagB = el('div', 'st-abs', root, { left: x, top: y + hh + 26 });
 		pill(tagB, { tone: 'neutral', text: p.note?.before ?? label('before'), size: 's' });

@@ -26,4 +26,11 @@ Not distributed
 Microsoft, the Microsoft logo, Visual Studio Code and VS Code are trademarks of Microsoft Corporation. The end card
 and title frame show the Microsoft logo; use the videos within the scope your organization allows.
 
-Catalog stills in .claude/skills/pr-video/catalog/ are rendered from made-up demo data.
+The catalog stills (the pictures of the diagram treatments) are rendered from made-up demo data.
+
+Slide decks (deck/)
+- Brand marks in deck/theme/logos/ come from Simple Icons (CC0-1.0, https://simpleicons.org), except `google` and
+  `openai` (Lobe Icons, MIT, @lobehub/icons-static-svg) and `vscode` (the Visual Studio Code logo, from
+  microsoft/vscode, MIT). The marks stay their owners' trademarks: use them only to name a company or where a link goes.
+- The layout samples (deck/samples/, and the samples picture of the presentation skill) are made-up demo data about a
+  fictional company (Contoso).

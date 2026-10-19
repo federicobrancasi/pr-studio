@@ -1,6 +1,6 @@
 // need: rules. A rule applied to cases: validation, filtering, permissions.
 import { defineTreatment } from '../engine/scene.js';
-import { C } from '../theme/tokens.js';
+import { C, TONE } from '../theme/tokens.js';
 import { card, el, icon, pill, tile, txt } from '../theme/primitives.js';
 import { codeLabel, codeStrip } from '../theme/code.js';
 import { clamp, decel, enter, lerp, prog, standard } from '../engine/motion.js';
@@ -131,7 +131,7 @@ export const stamps = defineTreatment({
 	need: 'rules',
 	name: 'Verdict stamps',
 	when: 'A rule shown through 3-6 concrete cases that each get a clear yes or no.',
-	params: { eyebrow: 'label', title: 'label', rule: '{ icon, text, at }  (the rule in one line)', cases: '[{ text, mono, sub, ok, verdict, why, at }]  (2-6)' },
+	params: { eyebrow: 'label', title: 'label', rule: '{ icon, text, at }  (the rule in one line)', cases: '[{ text, mono, sub, ok, verdict (2-3 words on the stamp), why (a few words beside it), at }]  (2-6)' },
 	demo: () => ({
 		eyebrow: label('The rule'), title: label('Only trusted folders run tasks'), rule: { icon: 'shield', text: label('Tasks run automatically only in a trusted workspace') },
 		cases: [{ text: label('~/work/app'), mono: true, sub: label('trusted'), ok: true, verdict: label('runs') }, { text: label('~/Downloads/repo'), mono: true, sub: label('not trusted'), ok: false, verdict: label('asks first'), why: label('restricted mode') }],
@@ -165,13 +165,12 @@ export const stamps = defineTreatment({
 			const st = pill(stamp, { tone: c.ok ? 'green' : 'red', iconName: c.ok ? 'check' : 'dismiss', text: c.verdict ?? (c.ok ? label('allowed') : label('blocked')), size: 'l', solid: true });
 			return { row, st };
 		});
-		return { h, rule, rows, times: spread(ctx, cases, { lead: 1.6, tail: 1.2 }) };
+		return { h, rule, rows, times: spread(ctx, cases, { lead: 1.6, tail: 1.2 }), ruleAt: p.rule ? ctx.at(p.rule.at, 0.5) : 0 };
 	},
 	render(i, t, ctx) {
-		const s = ctx.beat.start;
 		i.h.render(t);
 		if (i.rule) {
-			enter(i.rule, t, s + 0.5, { dy: 10 });
+			enter(i.rule, t, i.ruleAt, { dy: 10 });
 		}
 		i.rows.forEach((r, k) => {
 			const at = i.times[k];
@@ -194,9 +193,9 @@ export const sieve = defineTreatment({
 	when: 'A series of checks that filter cases (2-3 gates, 2-5 cases): which ones make it through, and where the others stop.',
 	params: {
 		eyebrow: 'label', title: 'label',
-		gates: '[{ label, sub }]  (2-3, in order)',
+		gates: '[{ label }]  (2-3, in order; short labels: they shrink together when the gates are close)',
 		pass: '{ label, icon }  (the zone for cases that pass every gate)',
-		cases: '[{ text, mono, stopsAt: gate number (1-based) or null when it passes, why, at }]  (2-5)',
+		cases: '[{ text, mono, stopsAt: gate number (1-based) or null when it passes, why, tone (a stopped case is red, a passing one green; set it when stopping is the intended outcome), at }]  (2-5)',
 	},
 	demo: () => ({
 		eyebrow: label('The rule'), title: label('Two checks before a token is sent'),
@@ -228,8 +227,9 @@ export const sieve = defineTreatment({
 			const chip = el('div', 'st-abs', root, { left: 96, top: y - 24, height: 48, display: 'flex', alignItems: 'center', gap: 10, padding: '0 18px', borderRadius: 12, background: '#fff', border: `1.5px solid ${C.lineStrong}`, whiteSpace: 'nowrap' });
 			chip.dataset.box = 'pill';
 			txt(chip, c.text, c.mono ? 'st-mono' : '', { fontSize: c.mono ? 19 : 21, fontWeight: 600, color: C.ink });
-			const why = c.why ? txt(root, c.why, 'st-abs', { left: 0, top: y + 27, fontSize: 18, color: c.stopsAt ? C.red : C.green, whiteSpace: 'nowrap' }, 'div') : null;
-			return { c, y, lane, chip, why };
+			const tone = TONE[c.tone ?? (c.stopsAt ? 'red' : 'green')] ?? TONE.red;
+			const why = c.why ? txt(root, c.why, 'st-abs', { left: 0, top: y + 27, fontSize: 18, color: tone.fg, whiteSpace: 'nowrap' }, 'div') : null;
+			return { c, y, lane, chip, why, tone };
 		});
 		// The pass zone is as wide as the widest case that reaches it; the gates share the space left of it.
 		const passW = Math.max(0, ...caseEls.filter(e => !e.c.stopsAt).map(e => e.chip.offsetWidth));
@@ -242,10 +242,12 @@ export const sieve = defineTreatment({
 		// Labels shrink a size when the gates are close; they must never touch.
 		const spacing = gates.length > 1 ? (right - left) / (gates.length - 1) : 640;
 		const labelW = spacing - 28;
+		// One size for all the labels: if one must shrink, they all do.
+		const small = gateEls.some(g => g.lab.firstChild.offsetWidth > labelW);
 		gateEls.forEach((g, k) => {
 			g.bar.style.left = `${gx2[k] - 4}px`;
 			const pillEl = g.lab.firstChild;
-			if (pillEl.offsetWidth > labelW) {
+			if (small) {
 				Object.assign(pillEl.style, { fontSize: '17px', height: '34px', padding: '0 14px' });
 			}
 			if (pillEl.offsetWidth > labelW) {
@@ -279,10 +281,11 @@ export const sieve = defineTreatment({
 			e.chip.style.opacity = String(clamp(prog(t, at - 0.6, at - 0.2)));
 			const done = prog(t, at + 1.0, at + 1.3);
 			const failed = !!e.c.stopsAt;
-			e.chip.style.borderColor = done > 0.5 ? (failed ? C.red : C.green) : C.lineStrong;
-			e.chip.style.background = done > 0.5 ? (failed ? C.redTint : '#fff') : '#fff';
+			e.chip.style.borderColor = done > 0.5 ? e.tone.fg : C.lineStrong;
+			e.chip.style.background = done > 0.5 && failed ? e.tone.tint : '#fff';
 			if (e.why) {
-				e.why.style.left = `${stop}px`;
+				// A stopped case's note ends where its chip ends, before the gate; a passing one starts with its chip.
+				e.why.style.left = `${failed ? Math.max(96, stop + w - e.why.offsetWidth) : stop}px`;
 				enter(e.why, t, at + 1.15, { dy: 6 });
 			}
 		});

@@ -58,8 +58,9 @@ export function cueSpec(value, facts) {
 /**
  * A provisional timeline from word lengths, so visuals can be built before the voice exists.
  * Same shape as build/timeline.json; replaced by the real one once `prs voice` finishes.
+ * `pace` speeds up the words and their pauses as voice.pace does the takes; the gaps between beats stay.
  */
-export function estimateTimeline(storyboard, facts, { leadIn = 0.6, gap = 0.35, tail = 2.5 } = {}) {
+export function estimateTimeline(storyboard, facts, { leadIn = 0.6, gap = 0.35, tail = 2.5, pace = 1 } = {}) {
 	let t = leadIn;
 	const beats = storyboard.beats.map((beat, k) => {
 		if (k) {
@@ -69,14 +70,14 @@ export function estimateTimeline(storyboard, facts, { leadIn = 0.6, gap = 0.35, 
 		const start = t;
 		const words = tokens.map((display, i) => {
 			const core = normalizeToken(display);
-			const dur = 0.13 + 0.052 * Math.max(2, core.length) + (/\d/.test(core) ? 0.12 * core.length : 0);
+			const dur = (0.13 + 0.052 * Math.max(2, core.length) + (/\d/.test(core) ? 0.12 * core.length : 0)) / pace;
 			const a = t;
 			t += dur;
 			const b = t;
 			if (/[.!?;:]["')\u201d]*$/.test(display)) {
-				t += 0.32;
+				t += 0.32 / pace;
 			} else if (/,["')\u201d]*$/.test(display)) {
-				t += 0.16;
+				t += 0.16 / pace;
 			}
 			return { i, display, spoken: display, a: +a.toFixed(3), b: +b.toFixed(3) };
 		});

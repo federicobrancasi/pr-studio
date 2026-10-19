@@ -137,11 +137,13 @@ export function cardHead(parent, { iconName, title, sub, tone = 'neutral', size 
 /** Slide heading: eyebrow + title (+ an optional tag pill on the right). Auto-fits the title to its width. */
 export function heading(parent, { eyebrow, title, tag, tagTone = 'purple', tagMono = false }) {
 	const wrap = el('div', 'st-abs', parent, { left: 96, top: 92, width: 1728 });
+	wrap.dataset.head = '';
 	const e = eyebrow ? txt(wrap, eyebrow, 'st-eyebrow', { display: 'block' }) : null;
 	const h = txt(wrap, title, 'st-title', { display: 'block', marginTop: eyebrow ? 14 : 0, whiteSpace: 'nowrap' }, 'div');
 	let tagNode = null;
 	if (tag) {
 		tagNode = el('div', 'st-abs', parent, { right: 96, top: 142 });
+		tagNode.dataset.head = '';
 		pill(tagNode, { tone: tagTone, text: tag, mono: tagMono });
 	}
 	return {

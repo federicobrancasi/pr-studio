@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { CACHE, CONFIG_FILE, DEFAULT_CONFIG, ROOT, isOffline, loadConfig, sha256File, writeJson } from './common.mjs';
+import { CACHE, CONFIG_FILE, DEFAULT_CONFIG, ROOT, isOffline, loadConfig, sha256File, voicePace, writeJson } from './common.mjs';
 import { chromePath } from './browser.mjs';
 
 const KOKORO = {
@@ -35,7 +35,7 @@ async function download(url, file) {
 	fs.renameSync(tmp, file);
 }
 
-export async function doctor({ samples = false } = {}) {
+export async function doctor({ samples = false, deck = false } = {}) {
 	let problems = 0;
 	console.log('pr-studio doctor');
 	const major = Number(process.versions.node.split('.')[0]);
@@ -68,70 +68,77 @@ export async function doctor({ samples = false } = {}) {
 	}
 	chromePath() ? ok('Chrome for Testing') : (fail('Chrome for Testing could not be installed'), problems++);
 
-	// Voice environment: Kokoro (offline voice), faster-whisper (word timing, sync gate), ffmpeg.
-	const venv = path.join(CACHE, 'venv');
-	const py = path.join(venv, 'bin', 'python');
-	if (!fs.existsSync(py)) {
-		const base = findPython();
-		if (!base) {
-			fail('Python 3.10-3.13 not found (brew install python@3.12)');
-			problems++;
-		} else {
-			console.log(`  creating the voice environment with ${base}...`);
-			fs.mkdirSync(CACHE, { recursive: true });
-			execFileSync(base, ['-m', 'venv', venv], { stdio: 'inherit' });
-		}
-	}
-	if (fs.existsSync(py)) {
-		// Pinned versions; installed again whenever voice/requirements.txt changes.
-		const requirements = path.join(ROOT, 'voice', 'requirements.txt');
-		const stamp = path.join(venv, '.prs-requirements');
-		const installed = fs.existsSync(stamp) ? fs.readFileSync(stamp, 'utf8').trim() : '';
-		const check = spawnSync(py, ['-c', 'import kokoro_onnx, faster_whisper, soundfile, numpy, imageio_ffmpeg'], { encoding: 'utf8' });
-		if (check.status !== 0 || installed !== sha256File(requirements)) {
-			console.log('  installing voice packages (voice/requirements.txt)...');
-			execFileSync(py, ['-m', 'pip', 'install', '-q', '--upgrade', 'pip'], { stdio: 'inherit' });
-			execFileSync(py, ['-m', 'pip', 'install', '-q', '-r', requirements], { stdio: 'inherit' });
-			fs.writeFileSync(stamp, sha256File(requirements));
-		}
-		ok('voice environment');
-		const bin = path.join(CACHE, 'bin', 'ffmpeg');
-		if (!fs.existsSync(bin)) {
-			const exe = execFileSync(py, ['-c', 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())'], { encoding: 'utf8' }).trim();
-			fs.mkdirSync(path.dirname(bin), { recursive: true });
-			fs.symlinkSync(exe, bin);
-		}
-		ok(`ffmpeg (${fs.realpathSync(bin)})`);
-		const kdir = path.join(CACHE, 'kokoro');
-		fs.mkdirSync(kdir, { recursive: true });
-		for (const [name, url] of Object.entries(KOKORO)) {
-			if (!fs.existsSync(path.join(kdir, name))) {
-				console.log(`  downloading ${name}...`);
-				await download(url, path.join(kdir, name));
+	// Slides need only the packages and the browser; videos also need the voice.
+	if (!deck) {
+		// Voice environment: Kokoro (offline voice), faster-whisper (word timing, sync gate), ffmpeg.
+		const venv = path.join(CACHE, 'venv');
+		const py = path.join(venv, 'bin', 'python');
+		if (!fs.existsSync(py)) {
+			const base = findPython();
+			if (!base) {
+				fail('Python 3.10-3.13 not found (brew install python@3.12)');
+				problems++;
+			} else {
+				console.log(`  creating the voice environment with ${base}...`);
+				fs.mkdirSync(CACHE, { recursive: true });
+				execFileSync(base, ['-m', 'venv', venv], { stdio: 'inherit' });
 			}
 		}
-		ok('Kokoro voice model (Apache-2.0)');
-		const w = spawnSync(py, ['-c', 'from faster_whisper import WhisperModel; WhisperModel("small.en", compute_type="int8")'], { encoding: 'utf8', env: { ...process.env, HF_HUB_DISABLE_TELEMETRY: '1', ...(isOffline() ? { HF_HUB_OFFLINE: '1' } : {}) } });
-		w.status === 0 ? ok('Whisper small.en (word timing and the sync gate)') : (fail(`Whisper model: ${w.stderr.trim().split('\n').at(-1)}`), problems++);
-		if (samples) {
-			const out = path.join(loadConfig().deliver, 'voice-samples');
-			spawnSync(py, [path.join(ROOT, 'voice', 'voice.py'), 'samples', '--out', out], { stdio: 'inherit', env: { ...process.env, PRS_FFMPEG: bin } });
+		if (fs.existsSync(py)) {
+			// Pinned versions; installed again whenever voice/requirements.txt changes.
+			const requirements = path.join(ROOT, 'voice', 'requirements.txt');
+			const stamp = path.join(venv, '.prs-requirements');
+			const installed = fs.existsSync(stamp) ? fs.readFileSync(stamp, 'utf8').trim() : '';
+			const check = spawnSync(py, ['-c', 'import kokoro_onnx, faster_whisper, soundfile, numpy, imageio_ffmpeg'], { encoding: 'utf8' });
+			if (check.status !== 0 || installed !== sha256File(requirements)) {
+				console.log('  installing voice packages (voice/requirements.txt)...');
+				execFileSync(py, ['-m', 'pip', 'install', '-q', '--upgrade', 'pip'], { stdio: 'inherit' });
+				execFileSync(py, ['-m', 'pip', 'install', '-q', '-r', requirements], { stdio: 'inherit' });
+				fs.writeFileSync(stamp, sha256File(requirements));
+			}
+			ok('voice environment');
+			const bin = path.join(CACHE, 'bin', 'ffmpeg');
+			if (!fs.existsSync(bin)) {
+				const exe = execFileSync(py, ['-c', 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())'], { encoding: 'utf8' }).trim();
+				fs.mkdirSync(path.dirname(bin), { recursive: true });
+				fs.symlinkSync(exe, bin);
+			}
+			ok(`ffmpeg (${fs.realpathSync(bin)})`);
+			const kdir = path.join(CACHE, 'kokoro');
+			fs.mkdirSync(kdir, { recursive: true });
+			for (const [name, url] of Object.entries(KOKORO)) {
+				if (!fs.existsSync(path.join(kdir, name))) {
+					console.log(`  downloading ${name}...`);
+					await download(url, path.join(kdir, name));
+				}
+			}
+			ok('Kokoro voice model (Apache-2.0)');
+			const w = spawnSync(py, ['-c', 'from faster_whisper import WhisperModel; WhisperModel("small.en", compute_type="int8")'], { encoding: 'utf8', env: { ...process.env, HF_HUB_DISABLE_TELEMETRY: '1', ...(isOffline() ? { HF_HUB_OFFLINE: '1' } : {}) } });
+			w.status === 0 ? ok('Whisper small.en (word timing and the sync gate)') : (fail(`Whisper model: ${w.stderr.trim().split('\n').at(-1)}`), problems++);
+			if (samples) {
+				const out = path.join(loadConfig().deliver, 'voice-samples');
+				spawnSync(py, [path.join(ROOT, 'voice', 'voice.py'), 'samples', '--out', out], { stdio: 'inherit', env: { ...process.env, PRS_FFMPEG: bin } });
+			}
 		}
 	}
 	APTOS.some(f => fs.existsSync(f)) ? ok('Aptos (from Microsoft Office; read in place, never copied)') : warn('Aptos not found (Microsoft Office): videos use Segoe UI or Inter instead');
 	const config = loadConfig();
 	if (!fs.existsSync(CONFIG_FILE)) {
 		writeJson(CONFIG_FILE, DEFAULT_CONFIG);
-		ok('wrote pr-studio.config.json (your local settings; not committed)');
+		ok(`wrote ${CONFIG_FILE} (your settings)`);
 	}
 	const mai = config.voice.mai;
-	if (process.env.AZURE_SPEECH_KEY) {
-		ok(`voice: MAI-Voice-2 (${mai.voice}) via AZURE_SPEECH_KEY`);
+	const pace = deck ? 1 : voicePace(config);
+	const faster = pace === 1 ? '' : `; ${pace}\u00d7 its own pace (voice.pace)`;
+	if (deck) {
+		// Slides have no voice.
+	} else if (process.env.AZURE_SPEECH_KEY) {
+		ok(`voice: MAI-Voice-2 (${mai.voice}) via AZURE_SPEECH_KEY${faster}`);
 	} else if (mai.azResource) {
-		ok(`voice: MAI-Voice-2 via az lookup of ${mai.azResource}, Kokoro when that fails`);
+		ok(`voice: MAI-Voice-2 via az lookup of ${mai.azResource}, Kokoro when that fails${faster}`);
 	} else {
-		ok(`voice: Kokoro ${config.voice.kokoro.voice} (offline). For MAI-Voice-2, set AZURE_SPEECH_KEY or voice.mai.azResource in pr-studio.config.json`);
+		ok(`voice: Kokoro ${config.voice.kokoro.voice} (offline)${faster}. For MAI-Voice-2, set AZURE_SPEECH_KEY or voice.mai.azResource in ${CONFIG_FILE}`);
 	}
-	console.log(problems ? `${problems} problem${problems > 1 ? 's' : ''} to fix` : 'ready');
+	console.log(problems ? `${problems} problem${problems > 1 ? 's' : ''} to fix` : deck ? 'ready for slides' : 'ready');
 	return !problems;
 }

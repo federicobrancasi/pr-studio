@@ -1,5 +1,5 @@
 // The fixed first beat. Frame 0 is the thumbnail: the title is composed from the start; the
-// "What changes" card slides in when the narration reaches the numbers.
+// "What changes" card slides in at the stats cue, or early in the beat when the narration doesn't say the numbers.
 import { defineTreatment } from '../engine/scene.js';
 import { C } from '../theme/tokens.js';
 import { card, el, fit, microsoftLogo, pill, txt } from '../theme/primitives.js';
@@ -111,13 +111,19 @@ export const frame = defineTreatment({
 		cardEl.style.height = `${Math.min(730, y + 30)}px`;
 		cardEl.style.top = `${Math.max(150, 170 + (730 - Math.min(730, y + 30)) / 2)}px`;
 		const at = p.at ?? {};
+		// A one-sentence title beat is short: the author, the numbers and the state come in sooner, so all are up before it ends.
+		const scale = Math.min(1, ctx.beat.duration / 11);
+		const quick = Math.max(0.3, Math.min(1, scale * 2));
+		const stats = ctx.at(at.stats ?? (ctx.has('stats') ? 'stats' : undefined), 5 * scale);
+		const stateRef = at.state ?? (ctx.has('state') ? 'state' : undefined);
 		const times = {
-			author: ctx.at(at.author ?? (ctx.has('author') ? 'author' : undefined), 2.4),
-			stats: ctx.at(at.stats ?? (ctx.has('stats') ? 'stats' : undefined), 5),
-			state: ctx.at(at.state ?? (ctx.has('state') ? 'state' : undefined), 8),
+			author: ctx.at(at.author ?? (ctx.has('author') ? 'author' : undefined), 2.4 * scale),
+			stats,
+			// Without a time of their own, the state pills come after the numbers have been said, not before.
+			state: stateRef !== undefined ? ctx.at(stateRef) : Math.max(ctx.at(undefined, 8 * scale), stats + 1.5 * scale),
 		};
 		return {
-			logo, eyebrow, title, sub, by, p1, p2, cardEl, addN, delN, meta, bars, times,
+			logo, eyebrow, title, sub, by, p1, p2, cardEl, addN, delN, meta, bars, times, quick,
 			totals: { additions: F.additions, deletions: F.deletions },
 			layout() {
 				// Headline: at most two lines; the stack below follows it and stays inside the frame.
@@ -143,22 +149,24 @@ export const frame = defineTreatment({
 		};
 	},
 	render(i, t) {
-		i.title.style.transform = `translateY(${lerp(6, 0, decel(prog(t, 0, 2.2)))}px)`;
-		enter(i.by, t, i.times.author);
-		enter(i.cardEl, t, i.times.stats - 0.45, { dx: 28, dy: 0, dur: 0.6 });
-		const tot = decel(prog(t, i.times.stats - 0.15, i.times.stats + 0.25));
+		// In a short title beat everything moves quicker, so it is all in place before the beat ends.
+		const k = i.quick;
+		i.title.style.transform = `translateY(${lerp(6, 0, decel(prog(t, 0, 2.2 * k)))}px)`;
+		enter(i.by, t, i.times.author, { dur: 0.6 * k });
+		enter(i.cardEl, t, i.times.stats - 0.45 * k, { dx: 28, dy: 0, dur: 0.6 * k });
+		const tot = decel(prog(t, i.times.stats - 0.15 * k, i.times.stats + 0.25 * k));
 		i.addN.style.opacity = i.delN.style.opacity = String(tot);
-		i.meta.style.opacity = String(decel(prog(t, i.times.stats + 0.6, i.times.stats + 1.0)));
-		i.addN.textContent = `+${fmt(count(t, i.times.stats - 0.1, 0.9, i.totals.additions))}`;
-		i.delN.textContent = `\u2212${fmt(count(t, i.times.stats - 0.1, 0.9, i.totals.deletions))}`;
+		i.meta.style.opacity = String(decel(prog(t, i.times.stats + 0.6 * k, i.times.stats + 1.0 * k)));
+		i.addN.textContent = `+${fmt(count(t, i.times.stats - 0.1 * k, 0.9 * k, i.totals.additions))}`;
+		i.delN.textContent = `\u2212${fmt(count(t, i.times.stats - 0.1 * k, 0.9 * k, i.totals.deletions))}`;
 		for (const b of i.bars) {
-			const q = decel(prog(t, i.times.stats + 0.4 + b.k * 0.05, i.times.stats + 1.2 + b.k * 0.05));
+			const q = decel(prog(t, i.times.stats + (0.4 + b.k * 0.05) * k, i.times.stats + (1.2 + b.k * 0.05) * k));
 			b.g.style.width = `${b.ga * q}px`;
 			b.r.style.width = `${b.rd * q}px`;
 		}
-		enter(i.p1, t, i.times.state, { dy: 8 });
+		enter(i.p1, t, i.times.state, { dy: 8, dur: 0.6 * k });
 		if (i.p2) {
-			enter(i.p2, t, i.times.state + 0.15, { dy: 8 });
+			enter(i.p2, t, i.times.state + 0.15 * k, { dy: 8, dur: 0.6 * k });
 		}
 	},
 });
