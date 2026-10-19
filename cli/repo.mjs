@@ -4,9 +4,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ROOT, timed } from './lib/common.mjs';
 
-export const REPO_COMMANDS = new Set(['changelog', 'prompt', 'triage', 'budget', 'prefetch', 'summary', 'gallery']);
+export const REPO_COMMANDS = new Set(['changelog', 'digest', 'demo', 'prompt', 'triage', 'budget', 'prefetch', 'summary', 'gallery']);
 
 export const REPO_HELP = `  prs changelog [--run id | file]    the videos for the top 5 of today's #changelog (report from vscode-engineering)
+  prs digest new [--run id | --file report.md]   one video for the top 5 of a #changelog report (guides/digest.md)
+  prs digest check | stills [--at t,..] | render | scenes [slug]   check, look at, render it; the drawn scenes
+  prs demo <id> [--slug s]           record demos/<id>.mjs in VS Code (PRS_VSCODE: the build; signed in on macOS)
   prs prompt <PR>                    the prompt for a run nobody watches (a GitHub Actions job) to make that PR's video
   prs triage <PRs...> | --file f     which PRs get a video, which are faster to read (--cap n for a changelog)
   prs summary [triage.json]          the closing Slack message for a triage run
@@ -18,6 +21,20 @@ export const REPO_HELP = `  prs changelog [--run id | file]    the videos for th
 
 export async function repoCommand(cmd, args) {
 	switch (cmd) {
+		case 'digest': {
+			const { digestCommand } = await import('./lib/digest.mjs');
+			process.exitCode = await digestCommand(args);
+			return;
+		}
+		case 'demo': {
+			const { demo } = await import('./lib/demo.mjs');
+			const { digestSlug } = await import('./lib/digest.mjs');
+			if (!args._[0]) {
+				throw new Error('prs demo <id> [--slug changelog-<date>]: records videos/<slug>/demos/<id>.mjs');
+			}
+			await timed(null, 'demo', () => demo(digestSlug(args.slug), args._[0]));
+			return;
+		}
 		case 'changelog': {
 			const { changelog, printChangelog } = await import('./lib/changelog.mjs');
 			const plan = await timed(null, 'changelog', () => changelog({ file: args._[0] ?? null, run: args.run ?? null }));

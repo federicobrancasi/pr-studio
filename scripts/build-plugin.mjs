@@ -15,8 +15,8 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /** Folders and files of the engine. */
 const INCLUDE = ['cli/', 'engine/', 'theme/', 'catalog/', 'deck/', 'voice/', 'package.json', 'package-lock.json', 'LICENSE', 'NOTICE'];
-/** What only this repository needs: Slack requests, the #changelog videos, the README gallery. */
-const REPO_ONLY = ['cli/repo.mjs', 'cli/lib/changelog.mjs', 'cli/lib/triage.mjs', 'cli/lib/prefetch.mjs', 'cli/lib/prompt.mjs', 'cli/lib/gallery.mjs'];
+/** What only this repository needs: Slack requests, the #changelog videos and digest, the README gallery. */
+const REPO_ONLY = ['cli/repo.mjs', 'cli/lib/changelog.mjs', 'cli/lib/digest.mjs', 'cli/lib/demo.mjs', 'cli/lib/triage.mjs', 'cli/lib/prefetch.mjs', 'cli/lib/prompt.mjs', 'cli/lib/gallery.mjs'];
 /** Loaded only in the repository, after checking it is there: may be missing from the pack. */
 const OPTIONAL = new Set(['cli/repo.mjs', 'cli/lib/gallery.mjs']);
 const SKIP_PARTS = new Set(['__pycache__', 'out', '.DS_Store']);
