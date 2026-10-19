@@ -4,9 +4,10 @@
 // A chapter: a Before → Now strip in a column on the left (pr-studio's compare look) and, on the right, the recording of
 // a demo (with camera moves) or a drawn scene. While the changed UI is on screen, a thin arrow runs from a strip row to
 // it and a soft ring marks it.
-import { C, prim, motion, clamp, segmentAt, clipLayer, targetBox, captions, progressLine, cutOpacity, CLIP_W, CLIP_H } from './kit.js';
+import { C, prim, motion, clamp, segmentAt, clipLayer, captions, progressLine, cutOpacity, CLIP_W, CLIP_H } from './kit.js';
+import { trackBoxAt } from './track.js';
 import { SCENES } from './scenes/index.js';
-import { esc, make, svgEl, iconSlot, fillIcons } from './scenes/chrome.js';
+import { esc, make, svgEl, iconSlot, fillIcons, liveRect } from './scenes/chrome.js';
 
 const { decel, standard, lerp, enter } = motion;
 
@@ -241,69 +242,52 @@ export default function createPlayer(root, DATA) {
 			items.push({ kind: 'setting', name: s.setting.name, state: s.setting.state, at: s.setting.at ?? n.at + 0.35 });
 		}
 		const strip = buildStrip(stripHost, items);
-		const links = (s.links ?? []).map(l => ({ ...l, from: l.from ?? (strip.rows[l.row]?.it.at ?? n.at) + 0.45 }));
-		return { strip, links, camera: s.camera ?? [], scene };
+		return { strip, camera: seg.camera ?? [], scene };
 	}
 
-	/** A target's page rect at t: a demo's mark (through the camera) or a scene's piece while it is on screen. */
-	function rectOf(seg, plan, name, box, t) {
-		if (seg.clip && seg.targets[name]) {
-			return targetBox(seg, name, box);
-		}
-		const w = plan.scene?.windows?.[name];
-		if (plan.scene?.windows && (!w || t < w[0] || t >= w[1])) {
-			return null;
-		}
-		return plan.scene?.rects?.[name] ?? null;
-	}
-
-	/** [from, to] of a link at t (clipped to when its target is on screen: a demo's mark, a scene's piece), or null. */
-	function linkSpan(seg, plan, link, t) {
-		let a = link.from, b = link.until ?? seg.end;
-		const sceneWindow = plan.scene?.windows ? plan.scene.windows[link.target] ?? [Infinity, -Infinity] : null;
-		if (sceneWindow) {
-			a = Math.max(a, sceneWindow[0]);
-			b = Math.min(b, sceneWindow[1]);
-		} else if (seg.clip && seg.targets[link.target]) {
-			// A window that lasts until the recording's end stays up through the hold on its last frame.
-			const last = seg.clip.anchors?.at(-1)?.at ?? seg.end;
-			const w = (seg.targets[link.target].windows ?? []).map(([x, y]) => [x, y >= last - 0.02 ? seg.end : y]).find(([x, y]) => t >= x && t < y);
-			if (!w) {
+	/**
+	 * Where the focus is on the page at t, or null when it isn't on screen then. A demo's mark: its box as recorded in the
+	 * frame shown at t, through the camera. A scene's part: measured now (fonts, animations), while it is drawn and
+	 * opaque.
+	 */
+	function focusRect(seg, plan, t, box) {
+		const name = seg.focus.name;
+		if (seg.clip) {
+			const k = Math.max(0, Math.min(seg.clip.map.length - 1, Math.floor((t - seg.start) * seg.clip.fps + 1e-6)));
+			const at = trackBoxAt(seg.targets[name], (seg.clip.map[k] - 1) / seg.clip.clipFps);
+			if (!at) {
 				return null;
 			}
-			a = Math.max(a, w[0]);
-			b = Math.min(b, w[1]);
+			const [x, y, w, h] = at;
+			const sx = box.w / CLIP_W, sy = box.h / CLIP_H;
+			return { x: box.x + x * sx, y: box.y + y * sy, w: w * sx, h: h * sy };
 		}
-		return t >= a && t < b ? [a, b] : null;
+		const w = plan.scene?.windows?.[name];
+		const r = plan.scene?.rects?.[name];
+		if (!w || !r || t < w[0] || t >= w[1]) {
+			return null;
+		}
+		return r.el ? liveRect(r.el) : r;
 	}
 
-	function drawLinks(seg, plan, t, box) {
-		for (const link of plan.links) {
-			const span = linkSpan(seg, plan, link, t);
-			const row = plan.strip.rows[link.row];
-			const raw = span && row ? rectOf(seg, plan, link.target, box, t) : null;
-			if (!raw) {
-				continue;
-			}
-			const [a, b] = span;
-			const color = TONE[link.tone ?? 'green'];
-			const ring = inflate(raw, link.pad ?? 6);
-			const g = svgEl(svg, 'g', { opacity: clamp((b - t) / 0.2).toFixed(3) });
-			drawRing(g, ring, color, decel(clamp((t - a - 0.2) / 0.4)), link);
-			let endY;
-			if (link.also) {
-				// UI that opens right below the target (a tooltip): the arrow stops below it instead of crossing it.
-				const alsoSpan = linkSpan(seg, plan, { target: link.also, from: a, until: b }, t);
-				const r2 = alsoSpan ? rectOf(seg, plan, link.also, box, t) : null;
-				if (r2) {
-					endY = lerp(ring.y + ring.h, r2.y + r2.h + 4, decel(clamp((t - alsoSpan[0]) / 0.3))) + 3;
-				}
-			}
-			const stop = link.stop ? rectOf(seg, plan, link.stop, box, t) : null;
-			const pts = route(link, { x: COL.x + COL.w + 2, y: row.cy }, ring, endY, stop, plan.scene?.lane);
-			prim.connector(g, pts, { color: '#fff', width: 7.5, radius: 14 }).render(t, a, 0.5);
-			prim.connector(g, pts, { color, width: 3, radius: 14 }).render(t, a, 0.5);
+	/** The chapter's one arrow: from its row to the focus, with a ring around it, while both are there. */
+	function drawFocus(seg, plan, t, box) {
+		const f = seg.focus;
+		if (!f || t < f.from || t >= f.until) {
+			return;
 		}
+		const row = plan.strip.rows[f.row];
+		const raw = row ? focusRect(seg, plan, t, box) : null;
+		if (!raw) {
+			return;
+		}
+		const color = TONE.green;
+		const ring = inflate(raw, 6);
+		const g = svgEl(svg, 'g', { opacity: clamp((f.until - t) / 0.25).toFixed(3) });
+		drawRing(g, ring, color, decel(clamp((t - f.from - 0.2) / 0.4)));
+		const pts = route({}, { x: COL.x + COL.w + 2, y: row.cy }, ring);
+		prim.connector(g, pts, { color: '#fff', width: 7.5, radius: 14 }).render(t, f.from, 0.5);
+		prim.connector(g, pts, { color, width: 3, radius: 14 }).render(t, f.from, 0.5);
 	}
 
 	let current = null, plan = null;
@@ -383,7 +367,7 @@ export default function createPlayer(root, DATA) {
 				plan.scene?.render(t, svg);
 				renderStrip(plan.strip, t);
 				drawStripArrows(svg, plan.strip, t);
-				drawLinks(seg, plan, t, box);
+				drawFocus(seg, plan, t, box);
 			}
 			return `${key}|${caps.render(t)}`;
 		},

@@ -54,7 +54,24 @@ export function fillIcons(node) {
 export function sceneRect(node, host, view) {
 	const a = node.getBoundingClientRect(), b = host.getBoundingClientRect();
 	const k = host.offsetWidth ? b.width / host.offsetWidth : 1;
-	return { x: view.x + (a.left - b.left) / k, y: view.y + (a.top - b.top) / k, w: a.width / k, h: a.height / k };
+	const r = { x: view.x + (a.left - b.left) / k, y: view.y + (a.top - b.top) / k, w: a.width / k, h: a.height / k };
+	// The player measures the node again in each frame (liveRect): it moves as it animates in, and with the fonts.
+	Object.defineProperty(r, 'el', { value: node, enumerable: false });
+	return r;
+}
+
+/** Where a node is on the page now, or null when it isn't really showing (mostly transparent, or not laid out). */
+export function liveRect(node) {
+	let opacity = 1;
+	for (let n = node; n && n.nodeType === 1; n = n.parentElement) {
+		const style = getComputedStyle(n);
+		if (style.display === 'none' || style.visibility === 'hidden') {
+			return null;
+		}
+		opacity *= Number(style.opacity);
+	}
+	const a = node.getBoundingClientRect();
+	return opacity >= 0.5 && a.width > 1 && a.height > 1 ? { x: a.left, y: a.top, w: a.width, h: a.height } : null;
 }
 
 /**

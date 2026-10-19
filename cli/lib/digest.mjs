@@ -16,6 +16,7 @@ import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { ROOT, buildDir, findFfmpeg, isOffline, loadConfig, readJson, videoDir, writeJson } from './common.mjs';
 import { launch } from './browser.mjs';
+import { trackBoxAt } from '../../digest/track.js';
 
 const FPS = 30, CLIP_FPS = 30;
 const CLIP_W = 1280, CLIP_H = 720;
@@ -129,8 +130,8 @@ function skeleton(date, picks) {
 			eyebrow: 'TODO: where it happens (optional)',
 			before: { at: 'TODO: a phrase of this chapter\'s narration', rows: [{ id: 'old', text: 'TODO' }] },
 			now: { at: 'TODO: the phrase that states the change', rows: [{ id: 'new', text: 'TODO' }] },
-			visual: 'TODO: { "demo": "c' + (i + 1) + '" } or { "scene": { "name": "...", "params": { } } }',
-			links: [],
+			visual: 'TODO: { "demo": "c' + (i + 1) + '" } or { "scene": { "name": "...", "params": { } } } (a card: "name": "card")',
+			focus: 'TODO: the part or mark that shows the change (its Now row points to it); remove for a card',
 		}])),
 	};
 }
@@ -288,7 +289,125 @@ function prettyDate(date) {
 const NUMBERS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven'];
 
 /** DATA for the page: segments with resolved chapter specs, clip timing, marks in video time; the audio plan. */
-export function planDigest(slug) {
+/** When each strip row has fully come in (seconds of the video), as the player shows it. */
+export function rowTimes(spec) {
+	const out = {};
+	(spec.before?.rows ?? []).forEach((r, i) => {
+		out[r.id] = (r.at ?? spec.before.at + 0.15 + 0.12 * i) + 0.6;
+	});
+	(spec.now?.rows ?? []).forEach((r, i) => {
+		out[r.id] = (r.at ?? spec.now.at + 0.12 * i) + 0.6;
+	});
+	return out;
+}
+
+/** The Now row an arrow starts from by default: the first one that is a change (green), or the first. */
+export function defaultFocusRow(spec) {
+	const rows = spec.now?.rows ?? [];
+	return (rows.find(r => (r.tone ?? (r.changed === false ? undefined : 'green')) === 'green') ?? rows[0])?.id;
+}
+
+/**
+ * A chapter's one arrow, computed: from its row (once the row is in) to the focus target, while the target is on
+ * screen (a demo's mark: as recorded; a scene's part: as the scene draws it). Under 1 s, no arrow (focusProblem
+ * says why). For a demo, the camera moves in on the focus mark when it shows (as close as it fits, at most 1.5x).
+ */
+export function planFocus(id, spec, { start, end, targets, kit, demo, clip, recording }) {
+	const out = { focus: null, focusProblem: null, camera: [] };
+	const name = spec.focus;
+	if (!name) {
+		return out;
+	}
+	const row = spec.focusRow ?? defaultFocusRow(spec);
+	const rowIn = rowTimes(spec)[row];
+	if (rowIn === undefined) {
+		out.focusProblem = `${id}: focusRow "${row}" is not a row of the strip`;
+		return out;
+	}
+	const fmt = x => (x - start).toFixed(1);
+	// Windows (seconds of the video) the arrow can be up in, each with when its target is on screen and steady.
+	let windows;
+	if (demo) {
+		const m = recording.marks[name];
+		if (!m?.rect) {
+			out.focusProblem = `${id}: the focus "${name}" is not a mark of the demo, or never on screen (marks: ${Object.keys(recording.marks).join(', ') || 'none'})`;
+			return out;
+		}
+		// Only while it shows the proof (the demo's text from the PR), and once it has stopped moving.
+		const proofs = [].concat(spec.proof ?? []).map(proofText).filter(Boolean);
+		windows = [];
+		m.visible.forEach(([ca, cb], i) => {
+			if (proofs.length && !proofs.every(p => proofText(m.texts?.[i] ?? '').includes(p))) {
+				return;
+			}
+			const steady = steadyFrom(m.track, ca, cb);
+			if (steady !== null) {
+				windows.push([recording.toVideo(steady), cb >= recording.cEnd - 0.05 ? end : recording.toVideo(cb), steady]);
+			}
+		});
+		if (!windows.length) {
+			out.focusProblem = proofs.length
+				? `${id}: the focus "${name}" never stays still on screen while it shows the proof: look at the demo's contact sheet`
+				: `${id}: the focus "${name}" never stays still on screen`;
+			return out;
+		}
+	} else {
+		const kind = kit[spec.scene?.name];
+		if (!kind) {
+			out.focusProblem = `${id}: there is no scene "${spec.scene?.name}"`;
+			return out;
+		}
+		if (spec.scene.name === 'card') {
+			out.focusProblem = `${id}: a card has nothing to point at: no focus`;
+			return out;
+		}
+		const parts = kind.windows(spec.scene.params ?? {}, { start, end });
+		if (!parts[name]) {
+			out.focusProblem = `${id}: the ${spec.scene.name} scene doesn't draw "${name}" with these params (it draws: ${Object.keys(parts).join(', ')})`;
+			return out;
+		}
+		windows = [parts[name]];
+	}
+	for (const [a, b, steadyClip] of windows) {
+		let from = Math.max(rowIn, a + 0.25);
+		const until = Math.min(b, end);
+		let camera = [];
+		if (demo) {
+			// The camera frames the focus as it is once steady, and the arrow waits for the camera to settle.
+			const m = recording.marks[name];
+			const box = trackBoxAt(m, steadyClip) ?? m.rect;
+			const z = Math.min(1.5, 0.5 * CLIP_W / box[2], 0.5 * CLIP_H / box[3]);
+			if (z >= 1.1) {
+				camera = [{ at: r3(Math.max(start + 0.2, a - 0.1)), dur: 0.9, z: r3(z), fx: r3(box[0] + box[2] / 2), fy: r3(box[1] + box[3] / 2) }];
+				from = Math.max(from, camera[0].at + camera[0].dur + 0.05);
+			}
+		}
+		if (until - from >= 1) {
+			out.focus = { name, row, from: r3(from), until: r3(until) };
+			out.camera = camera;
+			return out;
+		}
+	}
+	out.focusProblem = `${id}: "${name}" is on screen (and steady) ${windows.map(([a, b]) => `${fmt(a)}-${fmt(Math.min(b, end))} s`).join(', ')} into the chapter, but its row "${row}" is in only at ${fmt(rowIn)} s: the arrow would last under 1 s. Show it longer (or later, clip.start/end), or bring the row in earlier`;
+	return out;
+}
+
+/** The first moment (seconds of the recording) in [a, b] when a tracked mark has been still for 0.3 s, or null. */
+export function steadyFrom(track, a, b) {
+	const samples = (track ?? []).filter(s => s[0] >= a - 0.01 && s[0] <= b + 0.01);
+	for (let i = 0; i < samples.length; i++) {
+		const [t, x, y, w, h] = samples[i];
+		const recent = samples.filter(s => s[0] >= t - 0.3 && s[0] <= t);
+		const still = recent.every(s => Math.abs(s[1] + s[3] / 2 - (x + w / 2)) < 4 && Math.abs(s[2] + s[4] / 2 - (y + h / 2)) < 4 && Math.abs(s[3] - w) < 4 && Math.abs(s[4] - h) < 4);
+		if (still && (t - recent[0][0] >= 0.2 || t - a >= 0.2 && recent.length >= 2)) {
+			return t;
+		}
+	}
+	return null;
+}
+
+export async function planDigest(slug) {
+	const kit = await loadSceneDocs();
 	const dir = videoDir(slug), bdir = buildDir(slug);
 	const digest = readJson(path.join(dir, 'digest.json'));
 	const picksDoc = readJson(path.join(dir, 'picks.json'));
@@ -318,7 +437,7 @@ export function planDigest(slug) {
 			const pick = picks.get(ch.pick) ?? picksDoc.picks[Number(beat.id.slice(1)) - 1];
 			const ctx = { start: at, words: segWords };
 			const visual = ch.visual ?? {};
-			let targets = {}, steps = [];
+			let targets = {}, steps = [], recording = null;
 			if (visual.demo) {
 				anyDemo = true;
 				const ddir = path.join(bdir, 'demos', visual.demo);
@@ -328,57 +447,37 @@ export function planDigest(slug) {
 				}
 				const demo = readJson(demoFile);
 				const clipSpec = ch.clip ?? {};
-				// Where the recording stops (it holds its last frame): seconds, or a moment such as the end of a mark.
-				const end = Math.min(clipSpec.end === undefined ? demo.duration : clipMoment(clipSpec.end, demo, `${where}.clip.end`), demo.count / CLIP_FPS);
-				const pts = [[lead, 0]];
-				for (const [i, a] of (clipSpec.anchors ?? []).entries()) {
-					const v = resolveTime(a.at, ctx, `${where}.clip.anchors[${i}].at`) - at;
-					pts.push([v, clipMoment(a.clip, demo, `${where}.clip.anchors[${i}].clip`)]);
+				// The part of the recording shown: clip.start to clip.end (seconds, or a moment such as when a mark shows).
+				const cStart = clipSpec.start === undefined ? 0 : clipMoment(clipSpec.start, demo, `${where}.clip.start`);
+				const cEnd = Math.min(clipSpec.end === undefined ? demo.duration : clipMoment(clipSpec.end, demo, `${where}.clip.end`), demo.count / CLIP_FPS);
+				if (cEnd - cStart < 1) {
+					throw new Error(`${beat.id}: the part of the recording shown is ${(cEnd - cStart).toFixed(1)} s (clip.start/end): at least 1 s`);
 				}
-				for (let i = 1; i < pts.length; i++) {
-					if (pts[i][0] < pts[i - 1][0] - 1e-6 || pts[i][1] < pts[i - 1][1]) {
-						throw new Error(`${beat.id}: clip anchor ${i} (recording ${pts[i][1]} s at ${pts[i][0].toFixed(2)} s of the chapter) goes back in time`);
-					}
-				}
-				const [vLast, cLast] = pts.at(-1);
-				const vEnd = vLast + Math.max(0, end - cLast) / (clipSpec.after ?? 1);
-				pts.push([vEnd, end]);
+				// One steady speed: the recording fits the narration (up to twice as fast), then holds its last frame.
+				const rate = Math.min(2, Math.max(1, (cEnd - cStart) / Math.max(1, narr + timing.tail - 0.2)));
+				const vEnd = lead + (cEnd - cStart) / rate;
 				dur = Math.max(lead + narr + timing.tail, vEnd + timing.clipHold);
-				const clipAt = v => {
-					if (v <= pts[0][0]) {
-						return 0;
-					}
-					for (let i = 1; i < pts.length; i++) {
-						const [v0, c0] = pts[i - 1], [v1, c1] = pts[i];
-						if (v <= v1) {
-							return v1 === v0 ? c1 : c0 + (v - v0) / (v1 - v0) * (c1 - c0);
-						}
-					}
-					return end;
-				};
-				const inv = c => {
-					for (let i = 1; i < pts.length; i++) {
-						const [v0, c0] = pts[i - 1], [v1, c1] = pts[i];
-						if (c <= c1) {
-							return c1 === c0 ? v0 : v0 + (Math.max(c, c0) - c0) / (c1 - c0) * (v1 - v0);
-						}
-					}
-					return vEnd;
-				};
+				const clipAt = v => v <= lead ? cStart : Math.min(cEnd, cStart + (v - lead) * rate);
+				const inv = c => lead + (Math.min(cEnd, Math.max(cStart, c)) - cStart) / rate;
 				const n = Math.ceil(dur * FPS) + 1;
 				seg.clip = {
-					dir: pathToFileURL(path.join(ddir, 'frames')).href, fps: FPS,
+					dir: pathToFileURL(path.join(ddir, 'frames')).href, fps: FPS, clipFps: CLIP_FPS, rate: r3(rate),
 					map: Array.from({ length: n }, (_, k) => Math.max(1, Math.min(demo.count, Math.round(clipAt(k / FPS) * CLIP_FPS) + 1))),
-					anchors: pts.map(([v, c]) => ({ at: r3(at + v), clip: c })),
 				};
 				for (const [name, m] of Object.entries(demo.marks)) {
 					if (!m.rect) {
 						continue;
 					}
-					const windows = m.visible.map(([a, b]) => [r3(at + inv(a)), r3(at + Math.min(inv(b), dur))]).filter(([a, b]) => b > a);
-					targets[name] = { rect: m.rect, windows };
+					// When it is on screen in the video (the hold on the last frame included), and where it is in each frame
+					// of the recording (the player looks its box up at the frame it shows).
+					const windows = m.visible
+						.map(([a, b]) => [Math.max(a, cStart), Math.min(b, cEnd)])
+						.filter(([a, b]) => b - a > 0.05)
+						.map(([a, b]) => [r3(at + inv(a)), r3(at + (b >= cEnd - 0.05 ? dur : inv(b)))]);
+					targets[name] = { rect: m.rect, windows, visible: m.visible, track: m.track ?? [], text: m.text ?? '' };
 				}
 				steps = demo.steps.map(s => ({ label: s.label, at: r3(at + inv(s.t)) }));
+				recording = { toVideo: c => at + inv(c), cEnd, marks: demo.marks };
 			} else if (visual.scene) {
 				dur = lead + narr + timing.cardTail;
 			} else {
@@ -386,27 +485,15 @@ export function planDigest(slug) {
 			}
 			seg.end = r3(at + dur);
 			const full = { start: at, end: at + dur, words: segWords, targets, steps };
-			const { clip, visual: _v, pick: _p, ...rest } = ch;
+			const { clip, visual: _v, pick: _p, links: _l, camera: _c, ...rest } = ch;
 			const spec = resolveTimes(rest, full, where);
-			spec.camera = (spec.camera ?? []).map((c, i) => {
-				let fx = c.fx, fy = c.fy, fit;
-				if (c.focus) {
-					const r = targets[c.focus]?.rect;
-					if (!r) {
-						throw new Error(`${beat.id}: camera[${i}].focus "${c.focus}" is not a mark of the demo`);
-					}
-					[fx, fy] = [r[0] + r[2] / 2, r[1] + r[3] / 2];
-					fit = fitZoom(r);
-				}
-				// Focused on a mark without a zoom: as close as it still fits.
-				return { at: c.at, dur: c.dur ?? 1, z: c.zoom ?? c.z ?? fit ?? 1, fx: fx ?? 640, fy: fy ?? 360 };
-			});
 			if (visual.scene) {
 				spec.scene = { name: visual.scene.name, params: resolveTimes(visual.scene.params ?? {}, full, `${where}.visual.scene.params`) };
 			}
 			if (!spec.now?.rows?.length || spec.now.at === undefined) {
 				throw new Error(`${beat.id}: "now" needs "at" (the phrase that states the change) and rows`);
 			}
+			Object.assign(seg, planFocus(beat.id, spec, { start: at, end: at + dur, targets, kit, demo: visual.demo ? targets : null, clip: seg.clip, recording }));
 			const changed = spec.now.rows.filter(r => r.changed !== false && r.tone !== 'orange');
 			spec.recap = spec.recap ?? { before: spec.before?.rows?.[0]?.text ?? null, now: (changed.length ? changed : spec.now.rows).map(r => r.text).join(' · '), mono: (changed[0] ?? spec.now.rows[0]).mono ?? false };
 			Object.assign(spec, { rank: pick.rank, number: pick.number, author: pick.author, url: pick.url, flag: pick.flag });
@@ -492,60 +579,6 @@ function prCorpus(prSlug, cache) {
 	return cache.get(prSlug);
 }
 
-/** When a link's arrow starts, as the player does: its "from", or just after its row appears. */
-function linkStart(spec, link) {
-	if (link.from !== undefined) {
-		return link.from;
-	}
-	const rowAt = (rows, base, offset) => {
-		const i = (rows ?? []).findIndex(r => r.id === link.row);
-		return i < 0 ? undefined : rows[i].at ?? base + offset + 0.12 * i;
-	};
-	return (rowAt(spec.now?.rows, spec.now?.at, 0) ?? (spec.before ? rowAt(spec.before.rows, spec.before.at, 0.15) : undefined) ?? spec.now?.at) + 0.45;
-}
-
-/**
- * When a link's arrow can be up: its from and until, and when its target is on screen (a scene's part: null when
- * these params don't draw it; a demo's mark: as the player shows it, through the hold on the recording's last frame).
- */
-function linkTiming(seg, link, kit) {
-	const spec = seg.spec;
-	const from = linkStart(spec, link), until = link.until ?? seg.end;
-	if (spec.scene) {
-		const w = kit[spec.scene.name]?.windows(spec.scene.params ?? {}, { start: seg.start, end: seg.end }) ?? {};
-		return { from, until, windows: w[link.target] ? [w[link.target]] : null, parts: w };
-	}
-	const last = seg.clip?.anchors?.at(-1)?.at ?? seg.end;
-	return { from, until, windows: (seg.targets[link.target]?.windows ?? []).map(([a, b]) => [a, b >= last - 0.02 ? seg.end : b]), parts: null };
-}
-
-/** The arrows that would ring nothing: a target these params don't draw, or one never on screen while the arrow is. */
-export function linkProblems(seg, kit) {
-	const problems = [];
-	const spec = seg.spec;
-	const fmt = x => x.toFixed(1);
-	for (const l of spec.links ?? []) {
-		if (spec.scene && !kit[spec.scene.name]) {
-			continue;
-		}
-		const { from, until, windows, parts } = linkTiming(seg, l, kit);
-		for (const other of parts ? [l.stop, l.also].filter(Boolean) : []) {
-			if (!parts[other]) {
-				problems.push(`${seg.id}: the arrow to "${l.target}" uses "${other}", which these ${spec.scene.name} params don't draw`);
-			}
-		}
-		if (!windows) {
-			problems.push(`${seg.id}: the arrow from "${l.row}" points to "${l.target}", which these ${spec.scene.name} params don't draw: it would ring nothing`);
-			continue;
-		}
-		const overlap = windows.reduce((sum, [a, b]) => sum + Math.max(0, Math.min(b, until) - Math.max(a, from)), 0);
-		if (overlap < 0.4) {
-			problems.push(`${seg.id}: the arrow from "${l.row}" (${fmt(from)}-${fmt(until)} s) is never up while "${l.target}" is on screen (${windows.map(([a, b]) => `${fmt(a)}-${fmt(b)} s`).join(', ') || 'never'}): move its from/until, or the scene's times`);
-		}
-	}
-	return problems;
-}
-
 // ---------------------------------------------------------------------------------------------------------------
 // prs digest check
 
@@ -592,11 +625,16 @@ export async function checkDigest(slug) {
 		if (ch.setting?.name && !isPr(ch.setting.name)) {
 			problems.push(`${id}: the setting "${ch.setting.name}" is not in ${where}`);
 		}
-		const rowIds = new Set([...(ch.before?.rows ?? []), ...(ch.now?.rows ?? [])].map(r => r.id));
-		for (const l of ch.links ?? []) {
-			if (!rowIds.has(l.row)) {
-				problems.push(`${id}: a link starts at row "${l.row}", which is not a row of the strip (rows: ${[...rowIds].join(', ')})`);
+		// The arrow is computed (focus): the agent doesn't draw arrows, move the camera or time the recording.
+		for (const [field, instead] of [['links', '"focus": the one target its Now row points to (the arrow is drawn when both are on screen)'], ['camera', 'nothing: the camera moves in on the focus by itself'], ['clip.anchors', 'clip.start/clip.end to trim; the recording plays at one steady speed'], ['clip.after', 'nothing: the recording plays at one steady speed']]) {
+			const [a, b] = field.split('.');
+			if (b ? ch[a]?.[b] !== undefined : ch[a] !== undefined) {
+				problems.push(`${id}: "${field}" is gone: use ${instead}`);
 			}
+		}
+		const rowIds = new Set([...(ch.before?.rows ?? []), ...(ch.now?.rows ?? [])].map(r => r.id));
+		if (ch.focusRow && !(ch.now?.rows ?? []).some(r => r.id === ch.focusRow)) {
+			problems.push(`${id}: focusRow "${ch.focusRow}" is not a Now row (rows: ${[...rowIds].join(', ')})`);
 		}
 		const scene = ch.visual?.scene;
 		if (scene) {
@@ -604,10 +642,10 @@ export async function checkDigest(slug) {
 			if (!kind) {
 				problems.push(`${id}: there is no scene "${scene.name}" (scenes: ${Object.keys(kit).join(', ')})`);
 			} else {
-				for (const t of (ch.links ?? []).flatMap(l => [l.target, l.stop, l.also]).filter(Boolean)) {
-					if (!kind.targets.includes(t)) {
-						problems.push(`${id}: "${t}" is not a target of the ${scene.name} scene (targets: ${kind.targets.join(', ')})`);
-					}
+				if (ch.focus && scene.name === 'card') {
+					problems.push(`${id}: a card has nothing to point at: remove "focus"`);
+				} else if (ch.focus && !kind.targets.includes(ch.focus)) {
+					problems.push(`${id}: "${ch.focus}" is not a part of the ${scene.name} scene (parts: ${kind.targets.join(', ')})`);
 				}
 				// A drawn UI shows the PR's own strings: a scene drawn with made-up text would show a UI that doesn't exist.
 				for (const proof of kind.proofs(scene.params ?? {})) {
@@ -642,35 +680,31 @@ export async function checkDigest(slug) {
 				problems.push(`${id}: demo "${v.demo}" not recorded yet (prs demo ${v.demo})`);
 			} else {
 				const demo = readJson(f);
-				const used = new Set([...(ch.links ?? []).flatMap(l => [l.target, l.stop, l.also]), ...(ch.camera ?? []).map(c => c.focus)].filter(Boolean));
-				for (const m of used) {
-					if (!demo.marks[m]) {
-						problems.push(`${id}: "${m}" is not a mark of demo ${v.demo} (marks: ${Object.keys(demo.marks).join(', ') || 'none'})`);
-					} else if (!demo.marks[m].visible.length) {
-						problems.push(`${id}: mark "${m}" is never on screen in demo ${v.demo}: look at its contact sheet`);
-					}
+				const focus = ch.focus && demo.marks[ch.focus];
+				if (!ch.focus) {
+					problems.push(`${id}: a demo needs "focus": the mark that shows the change (its Now row points to it)`);
+				} else if (!focus) {
+					problems.push(`${id}: the focus "${ch.focus}" is not a mark of demo ${v.demo} (marks: ${Object.keys(demo.marks).join(', ') || 'none'})`);
+				} else if (!focus.visible.length) {
+					problems.push(`${id}: the focus "${ch.focus}" is never really on screen in demo ${v.demo} (covered, scrolled away, or never shown): look at its contact sheet and fix the demo, or use a scene or a card`);
+				} else if (Math.max(...focus.visible.map(([a, b]) => b - a)) < 1) {
+					problems.push(`${id}: the focus "${ch.focus}" is on screen under 1 s at a time in demo ${v.demo}: hold it longer (sleep) in the demo`);
 				}
-				// The demo shows the PR's UI: text from the PR, in a mark a Now row points to.
+				// The demo shows the PR's UI: text from the PR, in the focus mark, while it is on screen.
 				const proofs = [].concat(ch.proof ?? []);
-				const nowRows = new Set((ch.now?.rows ?? []).map(r => r.id));
-				const shown = (ch.links ?? []).filter(l => nowRows.has(l.row)).map(l => proofText(demo.marks[l.target]?.text)).join('\n');
+				const shown = proofText(focus?.text);
 				if (!proofs.length) {
-					problems.push(`${id}: a demo needs "proof": text from #${pick.number} that it shows (a label, a setting's description, a command), in a mark a Now row points to`);
+					problems.push(`${id}: a demo needs "proof": text from #${pick.number} that its focus mark shows (a label, a setting's description, a command)`);
 				}
 				for (const proof of proofs) {
 					if (proofText(proof).length < 10) {
 						problems.push(`${id}: the proof "${proof}" is too short to prove anything: 10 characters or more`);
 					} else if (!isPr(proof)) {
 						problems.push(`${id}: the proof "${proof}" is not in ${where}`);
+					} else if (proofText((demo.typed ?? []).join('\n')).includes(proofText(proof))) {
+						problems.push(`${id}: the demo types "${proof}" itself: that proves nothing. Prove it with text VS Code shows (a label, a description) that the demo didn't type`);
 					} else if (!shown.includes(proofText(proof))) {
-						problems.push(`${id}: no mark a Now row points to shows "${proof}": point one at the UI that says it (or this demo doesn't show the change: use a scene or a card)`);
-					}
-				}
-				for (const c of ch.camera ?? []) {
-					const r = c.focus && demo.marks[c.focus]?.rect;
-					const z = c.zoom ?? c.z;
-					if (r && z && z > fitZoom(r) + 0.05) {
-						problems.push(`${id}: a zoom of ${z} crops "${c.focus}" (it fits up to ${fitZoom(r)}): leave "zoom" out to fit it`);
+						problems.push(`${id}: the focus "${ch.focus}" never shows "${proof}" on screen: point the focus at the UI that says it (or this demo doesn't show the change: use a scene or a card)`);
 					}
 				}
 			}
@@ -680,9 +714,11 @@ export async function checkDigest(slug) {
 	}
 	if (fs.existsSync(path.join(bdir, 'timeline.json'))) {
 		try {
-			const { data } = planDigest(slug);
+			const { data } = await planDigest(slug);
 			for (const seg of data.segments.filter(x => x.kind === 'chapter')) {
-				problems.push(...linkProblems(seg, kit));
+				if (seg.focusProblem) {
+					problems.push(seg.focusProblem);
+				}
 			}
 			notes.push(`video: ${data.total.toFixed(1)} s (${data.segments.map(x => `${x.id} ${(x.end - x.start).toFixed(1)}`).join(', ')})`);
 			if (data.total > 75) {
@@ -711,7 +747,8 @@ async function buildPage(slug, data) {
 		'const player = createPlayer(document.getElementById(\'app\'), window.DATA);',
 		'window.seek = async t => player.seek(t);',
 		'window.chunks = () => player.chunks();',
-		'window.ready = async () => { await document.fonts.ready; return [...document.fonts].filter(f => f.status === \'loaded\').map(f => `${f.family} ${f.weight}`); };',
+		// Every font loads before the first frame: a part measured before its font is in is too narrow.
+		'window.ready = async () => { await Promise.all([...document.fonts].map(f => f.load().catch(() => null))); await document.fonts.ready; return [...document.fonts].filter(f => f.status === \'loaded\').map(f => `${f.family} ${f.weight}`); };',
 	].join('\n'));
 	await esbuild.build({
 		entryPoints: [entry], bundle: true, format: 'iife', platform: 'browser', outfile: path.join(pdir, 'bundle.js'),
@@ -783,29 +820,16 @@ function keyMoments(data) {
 	return times;
 }
 
-/**
- * The moment to review each chapter at: when its first Now arrow is fully drawn on its target (or its middle, with
- * no arrow), so a still shows the UI, the arrow and what it points at together.
- */
-function reviewMoments(data, kit) {
+/** The moment to review each chapter at: 1 s into its arrow (or its middle, with no arrow). */
+function reviewMoments(data) {
 	return data.segments.filter(s => s.kind === 'chapter').map(seg => {
-		const nowRows = new Set((seg.spec.now?.rows ?? []).map(r => r.id));
-		const link = (seg.spec.links ?? []).find(l => nowRows.has(l.row)) ?? seg.spec.links?.[0];
-		let t = (seg.start + seg.end) / 2;
-		if (link) {
-			const { from, until, windows } = linkTiming(seg, link, kit);
-			const w = (windows ?? []).find(([a, b]) => Math.min(b, until) > Math.max(a, from));
-			if (w) {
-				const a = Math.max(from, w[0]), b = Math.min(until, w[1]);
-				t = Math.min(a + 1.0, b - 0.1);
-			}
-		}
+		const t = seg.focus ? Math.min(seg.focus.from + 1, seg.focus.until - 0.1) : (seg.start + seg.end) / 2;
 		return { id: seg.id, t: r3(Math.max(seg.start + 0.6, Math.min(seg.end - 0.2, t))) };
 	});
 }
 
 export async function stillsDigest(slug, { at = null, workers = 3 } = {}) {
-	const { data } = planDigest(slug);
+	const { data } = await planDigest(slug);
 	const html = await buildPage(slug, data);
 	const dir = path.join(buildDir(slug), 'digest', 'stills');
 	fs.rmSync(dir, { recursive: true, force: true });
@@ -813,14 +837,14 @@ export async function stillsDigest(slug, { at = null, workers = 3 } = {}) {
 	const times = (at ?? keyMoments(data)).filter(t => t >= 0 && t <= data.total);
 	const shots = times.map((t, i) => ({ t, file: path.join(dir, `${String(i + 1).padStart(2, '0')}-${t.toFixed(2)}s.png`) }));
 	// One full-size still per chapter, for the review: each must be opened (the contact sheet is too small to judge).
-	const review = at ? [] : reviewMoments(data, await loadSceneDocs()).map(m => ({ ...m, file: path.join(dir, `review-${m.id}.png`) }));
+	const review = at ? [] : reviewMoments(data).map(m => ({ ...m, file: path.join(dir, `review-${m.id}.png`) }));
 	await capture(html, [...shots, ...review], 'png', workers);
 	grid(findFfmpeg(), shots.map(s => s.file), path.join(dir, 'contact.png'));
 	return { dir, shots, review, total: data.total };
 }
 
 export async function renderDigest(slug, { workers = 3 } = {}) {
-	const { data, audio, tempo } = planDigest(slug);
+	const { data, audio, tempo } = await planDigest(slug);
 	const bdir = buildDir(slug), out = path.join(bdir, 'digest');
 	fs.mkdirSync(out, { recursive: true });
 	writeJson(path.join(out, 'timeline.json'), data);

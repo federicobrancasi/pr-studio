@@ -23,6 +23,7 @@ import { pathToFileURL } from 'node:url';
 import { _electron } from 'playwright-core';
 import { buildDir, findFfmpeg, videoDir, writeJson } from './common.mjs';
 import { launch } from './browser.mjs';
+import { trackBoxAt } from '../../digest/track.js';
 
 const SIZE = { width: 1280, height: 720 };
 const FPS = 30;
@@ -303,6 +304,9 @@ export async function openVSCode({ files = {}, settings = {}, signedIn = process
 			'extensions.autoUpdate': false,
 			// The terminal's text in the page (not a GPU canvas): a mark on it records what it says.
 			'terminal.integrated.gpuAcceleration': 'off',
+			// A brand-new profile shows a full-window onboarding overlay ("Welcome to VS Code", sign in): on a slow
+			// machine it comes up seconds into a recording and covers it. This turns it off before the window opens.
+			'workbench.welcomePage.experimentalOnboarding': false,
 			...settings,
 		});
 		for (const [name, content] of Object.entries(files)) {
@@ -312,7 +316,7 @@ export async function openVSCode({ files = {}, settings = {}, signedIn = process
 		fs.mkdirSync(workspace, { recursive: true });
 		const args = [
 			`--user-data-dir=${data}`, `--extensions-dir=${path.join(tmp, 'extensions')}`,
-			'--skip-release-notes', '--disable-telemetry', '--disable-experiments', '--no-cached-data',
+			'--skip-release-notes', '--skip-welcome', '--disable-telemetry', '--disable-experiments', '--no-cached-data',
 			'--disable-updates', '--disable-workspace-trust', '--new-window', workspace,
 		];
 		if (process.platform === 'linux') {
@@ -495,8 +499,24 @@ async function screencast(page, dir) {
 
 /** The box of the first shown element of a locator's matches (or of a text inside it), in the page; null if none. */
 function measure(elements, text) {
+	// On top: at least 2 of 3 points across its middle hit it (or something inside it): not covered by an overlay, not
+	// a row of a list that isn't the one on screen. Elements that let clicks through hit their parent: that counts.
+	const onTop = (el, r) => {
+		let hits = 0;
+		for (const fx of [0.5, 0.2, 0.8]) {
+			const x = r.x + r.width * fx, y = r.y + r.height / 2;
+			if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) {
+				continue;
+			}
+			const hit = document.elementFromPoint(x, y);
+			if (hit && (hit === el || el.contains(hit) || hit.contains(el))) {
+				hits++;
+			}
+		}
+		return hits >= 2;
+	};
 	for (const el of elements) {
-		if (el.checkVisibility && !el.checkVisibility({ opacityProperty: true, visibilityProperty: true })) {
+		if (el.checkVisibility && !el.checkVisibility({ opacityProperty: true, visibilityProperty: true, contentVisibilityAuto: true })) {
 			continue;
 		}
 		let r = el.getBoundingClientRect();
@@ -523,7 +543,8 @@ function measure(elements, text) {
 			range.setEnd(range.endContainer, range.endOffset + 1);
 			r = range.getBoundingClientRect();
 		}
-		if (r.width > 0 && r.height > 0) {
+		const inWindow = r.width > 2 && r.height > 2 && r.right > 0 && r.bottom > 0 && r.left < innerWidth && r.top < innerHeight;
+		if (inWindow && onTop(el, r)) {
 			// What it says (or the marked words): a demo proves it shows the PR's UI with it.
 			const said = text ?? (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 4000);
 			return { x: r.x, y: r.y, width: r.width, height: r.height, text: said };
@@ -538,11 +559,12 @@ function markTracker(page) {
 	let running = true;
 	const sample = async () => {
 		while (running) {
-			const now = Date.now() / 1000;
 			for (const m of marks.values()) {
-				// evaluateAll does not wait for a match: a mark that is not on screen costs nothing.
+				// evaluateAll does not wait for a match: a mark that is not on screen costs nothing. Its time is when it was
+				// measured (the middle of the call), so it matches the frame on screen then.
+				const before = Date.now();
 				const box = await m.locator.evaluateAll(measure, m.text).catch(() => null);
-				m.samples.push({ t: now, box });
+				m.samples.push({ t: (before + Date.now()) / 2000, box });
 			}
 			await sleep(100);
 		}
@@ -563,31 +585,52 @@ function markTracker(page) {
 	};
 }
 
-/** Visible windows (clip seconds) and a representative box (the middle of the longest window), per mark. */
-function summarizeMarks(marks, t0, duration) {
+/**
+ * Per mark: when it is really on screen (windows, clip seconds), where it is at each moment (track: [t, x, y, w, h]
+ * of the samples it was on screen, about 10 a second), a representative box (rect: the middle of its longest window)
+ * and what it said while on screen (text).
+ */
+export function summarizeMarks(marks, t0, duration, viewport = [SIZE.width, SIZE.height]) {
 	const out = {};
+	const r1 = v => +v.toFixed(1), r2 = v => +v.toFixed(2);
+	// The frames are scaled to 1280x720 (2x): so are the boxes, if the page had another size.
+	const kx = SIZE.width / viewport[0], ky = SIZE.height / viewport[1];
+	const scale = b => b && { ...b, x: b.x * kx, y: b.y * ky, width: b.width * kx, height: b.height * ky };
 	for (const [name, m] of marks) {
+		const samples = m.samples.map(s => ({ t: r2(s.t - t0), box: scale(s.box) })).filter(s => s.t >= 0 && s.t <= duration + 0.05);
+		const track = samples.filter(s => s.box).map(s => [s.t, r1(s.box.x), r1(s.box.y), r1(s.box.width), r1(s.box.height)]);
 		const windows = [];
 		let open = null;
-		for (const s of m.samples) {
-			const t = +(s.t - t0).toFixed(2);
+		for (const s of samples) {
 			if (s.box && !open) {
-				open = { from: t, boxes: [] };
+				open = { from: s.t, to: s.t, boxes: [] };
 			}
 			if (s.box) {
+				open.to = s.t;
 				open.boxes.push(s.box);
-			}
-			if (!s.box && open) {
-				windows.push({ ...open, to: t });
+			} else if (open) {
+				windows.push({ ...open, to: s.t });
 				open = null;
 			}
 		}
 		if (open) {
-			windows.push({ ...open, to: +duration.toFixed(2) });
+			windows.push({ ...open, to: r2(duration) });
 		}
-		const kept = windows.filter(w => w.to > Math.max(0, w.from));
+		// One missed sample between two where it sits at the same place is a glitch, not a disappearance.
+		const merged = [];
+		for (const w of windows) {
+			const prev = merged.at(-1);
+			const a = prev?.boxes.at(-1), b = w.boxes[0];
+			if (prev && w.from - prev.to <= 0.35 && Math.abs(a.x - b.x) + Math.abs(a.y - b.y) < 8) {
+				prev.to = w.to;
+				prev.boxes.push(...w.boxes);
+			} else {
+				merged.push({ ...w, boxes: [...w.boxes] });
+			}
+		}
+		const kept = merged.filter(w => w.to - w.from >= 0.15);
 		if (!kept.length) {
-			out[name] = { rect: null, visible: [] };
+			out[name] = { rect: null, visible: [], texts: [], track: [], text: '' };
 			continue;
 		}
 		const longest = kept.reduce((a, b) => (b.to - b.from > a.to - a.from ? b : a));
@@ -595,8 +638,11 @@ function summarizeMarks(marks, t0, duration) {
 		// Everything it said while on screen (a terminal fills up, a list filters): each different text once.
 		const texts = [...new Set(kept.flatMap(w => w.boxes.map(b => b.text)).filter(Boolean))];
 		out[name] = {
-			rect: [box.x, box.y, box.width, box.height].map(v => +v.toFixed(1)),
-			visible: kept.map(w => [Math.max(0, w.from), Math.min(duration, w.to)].map(v => +v.toFixed(2))),
+			rect: [box.x, box.y, box.width, box.height].map(r1),
+			visible: kept.map(w => [Math.max(0, w.from), Math.min(duration, w.to)].map(r2)),
+			// What it said in each of those windows: the arrow goes up only in one where it shows the proof.
+			texts: kept.map(w => [...new Set(w.boxes.map(b => b.text).filter(Boolean))].join('\n').slice(0, 8000)),
+			track,
 			text: texts.join('\n').slice(0, 20000),
 		};
 	}
@@ -612,11 +658,11 @@ async function demoContact(dir, info, out) {
 		const frame = path.join(dir, 'frames', `${String(Math.min(info.count, Math.floor(t * FPS) + 1)).padStart(5, '0')}.jpg`);
 		const step = info.steps.filter(s => Math.abs(s.t - t) < 0.01).map(s => s.label).join(', ');
 		const boxes = names.map((n, i) => {
-			const m = info.marks[n];
-			if (!m.rect || !m.visible.some(([a, b]) => t >= a && t < b)) {
+			const at = trackBoxAt(info.marks[n], t);
+			if (!at) {
 				return '';
 			}
-			const [x, y, w, h] = m.rect.map(v => v / 2);
+			const [x, y, w, h] = at.map(v => v / 2);
 			return `<div class="b" style="left:${x}px;top:${y}px;width:${w}px;height:${h}px;border-color:${colors[i % colors.length]}"><span style="background:${colors[i % colors.length]}">${n}</span></div>`;
 		}).join('');
 		return `<figure><div class="f"><img src="${pathToFileURL(frame).href}">${boxes}</div><figcaption>${t.toFixed(2)} s${step ? ` · ${step.replace(/</g, '&lt;')}` : ''}</figcaption></figure>`;
@@ -707,6 +753,15 @@ export async function demo(slug, id, { signedIn = process.platform === 'darwin' 
 		throw error;
 	}
 	const { page, app } = vscode;
+	// Everything the demo types: a proof the demo typed itself (a search for the setting) proves nothing.
+	const typed = [];
+	for (const fn of ['type', 'insertText']) {
+		const original = page.keyboard[fn].bind(page.keyboard);
+		page.keyboard[fn] = (text, ...rest) => {
+			typed.push(String(text));
+			return original(text, ...rest);
+		};
+	}
 	const ctx = helpers(page, app);
 	ctx.scheme = build.quality === 'insider' ? 'vscode-insiders' : 'vscode';
 	ctx.workspace = vscode.workspace;
@@ -728,6 +783,7 @@ export async function demo(slug, id, { signedIn = process.platform === 'darwin' 
 		}
 		await showCursor(page);
 		await page.mouse.move(SIZE.width * 0.62, SIZE.height * 0.42);
+		const viewport = await page.evaluate(() => [innerWidth, innerHeight]);
 		recording = await screencast(page, raw);
 		tracker = markTracker(page);
 		await sleep(400);
@@ -760,7 +816,8 @@ export async function demo(slug, id, { signedIn = process.platform === 'darwin' 
 			id, fps: FPS, count, duration: +(count / FPS).toFixed(2), size: [SIZE.width, SIZE.height], scale: 2,
 			build, signedIn, fonts, recorded: new Date().toISOString(),
 			steps: steps.map(s => ({ ...s, t: Math.max(0, +(s.t - (first - start)).toFixed(2)) })),
-			marks: summarizeMarks(marks, first, count / FPS),
+			viewport, typed: typed.filter(x => x.length > 1),
+			marks: summarizeMarks(marks, first, count / FPS, viewport),
 		};
 		writeJson(path.join(out, 'demo.json'), info);
 		await demoContact(out, info, path.join(out, 'contact.png'));

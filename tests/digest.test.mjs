@@ -1,7 +1,7 @@
 // The changelog digest: its times (phrases of the narration, demo marks, steps) and the strip's height.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fitZoom, iconsOf, inProof, linkProblems, loadSceneDocs, proofCorpus, resolveTime, resolveTimes, stripHeight } from '../cli/lib/digest.mjs';
+import { fitZoom, iconsOf, inProof, loadSceneDocs, planFocus, proofCorpus, resolveTime, resolveTimes, steadyFrom, stripHeight } from '../cli/lib/digest.mjs';
 
 // A chapter that starts 10 s into the video: "Five. VS Code links can now add a plugin marketplace."
 const words = ['Five.', 'VS', 'Code', 'links', 'can', 'now', 'add', 'a', 'plugin', 'marketplace.']
@@ -78,28 +78,49 @@ test('a chapter\'s strings are the PR\'s: placeholders match the values shown, s
 	].map(t => inProof(corpus, t)), [true, true, true, true, true, false, false, false]);
 });
 
-test('a drawn UI must be the PR\'s, and an arrow must point at a part that is drawn and on screen', async () => {
+test('a drawn UI must be the PR\'s, and its one arrow goes up only once its row is in and its part is drawn', async () => {
 	const kit = await loadSceneDocs();
 	const corpus = proofCorpus('+	title: localize(\'newNested\', "New Nested Session"),');
 	const sessions = { title: 'Sessions', rows: [{ label: 'Update the README' }], after: { icon: 'add', tooltip: 'New Nested Session' }, hoverAt: 11, tooltipAt: 12, child: { label: 'New Session', at: 14 } };
 	const fake = { title: 'Model picker', rows: [{ label: 'Auto', sub: 'Org default' }], after: { icon: 'document', tooltip: 'Org default' }, hoverAt: 11 };
-	const seg = (params, links) => ({ id: 'c4', start: 10, end: 20, targets: {}, spec: { now: { at: 11, rows: [{ id: 'new', text: 'x' }] }, scene: { name: 'list-actions', params }, links } });
+	const spec = (params, focus, extra = {}) => ({ now: { at: 11, rows: [{ id: 'new', text: 'x' }] }, scene: { name: 'list-actions', params }, focus, ...extra });
+	const plan = s => planFocus('c2', s, { start: 10, end: 20, targets: {}, kit });
 	assert.deepStrictEqual({
 		proofs: [sessions, fake].map(p => kit['list-actions'].proofs(p).map(x => inProof(corpus, x.text))),
-		windows: kit['list-actions'].windows(sessions, { start: 10, end: 20 }),
-		fakeWindows: Object.keys(kit['list-actions'].windows(fake, { start: 10, end: 20 })),
-		ok: linkProblems(seg(sessions, [{ row: 'new', target: 'tooltip' }, { row: 'new', target: 'child' }]), kit),
-		// c4: an arrow to the tooltip of a scene that never shows it, rings an empty box.
-		ringsNothing: linkProblems(seg(fake, [{ row: 'new', target: 'tooltip' }]), kit).length,
-		// An arrow that is gone before its target shows.
-		tooEarly: linkProblems(seg(sessions, [{ row: 'new', target: 'child', until: 13.5 }]), kit).length,
+		// The row is in at 11.6; the tooltip shows 12-14: the arrow 12.25-14.
+		tooltip: plan(spec(sessions, 'tooltip')).focus,
+		child: plan(spec(sessions, 'child')).focus,
+		// The old c4: a tooltip these params never draw rings nothing: no arrow.
+		ringsNothing: plan(spec(fake, 'tooltip')).focusProblem !== null,
+		card: plan({ now: { at: 11, rows: [{ id: 'new', text: 'x' }] }, scene: { name: 'card', params: { title: 'x' } }, focus: 'title' }).focusProblem !== null,
+		noFocus: plan(spec(sessions, undefined)),
 	}, {
 		proofs: [[true], [false]],
-		windows: { row: [10, 20], action: [11, 20], tooltip: [12, 14], child: [14, 20] },
-		fakeWindows: ['row', 'action'],
-		ok: [],
-		ringsNothing: 1,
-		tooEarly: 1,
+		tooltip: { name: 'tooltip', row: 'new', from: 12.25, until: 14 },
+		child: { name: 'child', row: 'new', from: 14.25, until: 20 },
+		ringsNothing: true,
+		card: true,
+		noFocus: { focus: null, focusProblem: null, camera: [] },
+	});
+});
+
+test('a recorded focus gets its arrow only while it shows the proof, once still, after the camera settles', () => {
+	// A setting row that slides in (0.0-0.3), then stays; it shows the proof only in its second window (5-9 s).
+	const track = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 5.0, 5.1, 5.2, 5.3, 5.4, 5.5, 6, 7, 8, 9].map(t => [t, 100, t < 0.3 ? 300 - t * 300 : 210, 300, 60]);
+	const mark = { rect: [100, 210, 300, 60], visible: [[0, 1], [5, 9]], texts: ['Font Size', 'Generate images with GPT Image 2.5 Sunburst'], track };
+	const recording = { toVideo: c => 20 + c, cEnd: 9, marks: { row: mark } };
+	const spec = proof => ({ now: { at: 21, rows: [{ id: 'on', text: 'Image Generation' }] }, focus: 'row', proof });
+	const plan = s => planFocus('c2', s, { start: 20, end: 32, targets: { row: {} }, kit: {}, demo: {}, clip: {}, recording });
+	assert.deepStrictEqual({
+		steady: [steadyFrom(track, 0, 1), steadyFrom(track, 5, 9)],
+		withProof: plan(spec('GPT Image 2.5 Sunburst')),
+		typedAwayProof: plan(spec('Not shown anywhere')).focusProblem !== null,
+	}, {
+		steady: [0.6, 5.2],
+		// Shown at 25 s in the video, steady at 25.2; the camera zooms in once it is steady (25.1-26.0); the arrow waits
+		// until 26.05, and holds to the chapter's end (the window lasts to the recording's end).
+		withProof: { focus: { name: 'row', row: 'on', from: 26.05, until: 32 }, focusProblem: null, camera: [{ at: 25.1, dur: 0.9, z: 1.5, fx: 250, fy: 240 }] },
+		typedAwayProof: true,
 	});
 });
 
