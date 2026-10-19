@@ -110,17 +110,20 @@ test('a recorded focus gets its arrow only while it shows the proof, once still,
 	const mark = { rect: [100, 210, 300, 60], visible: [[0, 1], [5, 9]], texts: ['Font Size', 'Generate images with GPT Image 2.5 Sunburst'], track };
 	const recording = { toVideo: c => 20 + c, cEnd: 9, marks: { row: mark } };
 	const spec = proof => ({ now: { at: 21, rows: [{ id: 'on', text: 'Image Generation' }] }, focus: 'row', proof });
-	const plan = s => planFocus('c2', s, { start: 20, end: 32, targets: { row: {} }, kit: {}, demo: {}, clip: {}, recording });
+	const plan = (s, r = recording) => planFocus('c2', s, { start: 20, end: 32, targets: { row: {} }, kit: {}, demo: {}, clip: {}, recording: r });
+	const wholeEditor = { ...recording, marks: { row: { ...mark, rect: [0, 35, 1280, 650] } } };
 	assert.deepStrictEqual({
 		steady: [steadyFrom(track, 0, 1), steadyFrom(track, 5, 9)],
 		withProof: plan(spec('GPT Image 2.5 Sunburst')),
 		typedAwayProof: plan(spec('Not shown anywhere')).focusProblem !== null,
+		ringsMostOfTheWindow: plan(spec('GPT Image 2.5 Sunburst'), wholeEditor).focusProblem !== null,
 	}, {
 		steady: [0.6, 5.2],
 		// Shown at 25 s in the video, steady at 25.2; the camera zooms in once it is steady (25.1-26.0); the arrow waits
 		// until 26.05, and holds to the chapter's end (the window lasts to the recording's end).
 		withProof: { focus: { name: 'row', row: 'on', from: 26.05, until: 32 }, focusProblem: null, camera: [{ at: 25.1, dur: 0.9, z: 1.5, fx: 250, fy: 240 }] },
 		typedAwayProof: true,
+		ringsMostOfTheWindow: true,
 	});
 });
 

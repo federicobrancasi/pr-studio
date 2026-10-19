@@ -333,6 +333,10 @@ export function planFocus(id, spec, { start, end, targets, kit, demo, clip, reco
 			out.focusProblem = `${id}: the focus "${name}" is not a mark of the demo, or never on screen (marks: ${Object.keys(recording.marks).join(', ') || 'none'})`;
 			return out;
 		}
+		if (m.rect[2] * m.rect[3] > 0.4 * CLIP_W * CLIP_H) {
+			out.focusProblem = `${id}: the focus "${name}" is most of the window (${m.rect.slice(2).map(Math.round).join('x')}): a ring around it says nothing. Mark the UI that shows the change (the setting's row, the dialog, the button)`;
+			return out;
+		}
 		// Only while it shows the proof (the demo's text from the PR), and once it has stopped moving.
 		const proofs = [].concat(spec.proof ?? []).map(proofText).filter(Boolean);
 		windows = [];
