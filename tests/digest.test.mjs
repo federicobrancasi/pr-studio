@@ -133,14 +133,12 @@ test('every icon a chapter uses is found: in rows, heads and scene params', () =
 });
 
 
-test('a drawn setting has VS Code\'s own title; another title must be proved from the PR', async () => {
+test('a drawn setting has VS Code\'s own title, and no invented badge', async () => {
 	const kit = await loadSceneDocs();
-	const titleProofs = params => kit.setting.proofs(params).filter(x => x.param === 'title').map(x => x.text);
-	assert.deepStrictEqual([
-		titleProofs({ id: 'chat.copilot.ensemble.enabled', title: 'Fusion' }),
-		titleProofs({ id: 'chat.copilot.imageGeneration.enabled', title: 'Chat › Copilot › Image Generation: Enabled' }),
-		titleProofs({ id: 'chat.copilotCliCommand.enabled' }),
-	], [['Fusion'], [], []]);
+	assert.deepStrictEqual({
+		params: ['title', 'badge'].filter(k => k in kit.setting.params),
+		proofs: kit.setting.proofs({ id: 'chat.copilot.ensemble.enabled', title: 'Fusion', description: 'When enabled, Auto is presented as Fusion' }).map(x => x.param),
+	}, { params: [], proofs: ['id', 'description'] });
 });
 
 test('a recording starts 1.2 s before its focus first shows the proof: how the demo got there is cut', () => {
@@ -152,3 +150,10 @@ test('a recording starts 1.2 s before its focus first shows the proof: how the d
 	], [5.83, 0, 0]);
 });
 
+
+test('a recorded mark on screen to the recording\'s end keeps its last box through the hold on the last frame', async () => {
+	const { trackBoxAt } = await import('../digest/track.js');
+	// On screen 7-11.23 s; the last sample is at 10.8 s (the recorder stops sampling a few tenths before the end).
+	const mark = { visible: [[7, 11.23]], track: [[7, 1, 2, 3, 4], [10.8, 5, 6, 7, 8]] };
+	assert.deepStrictEqual([trackBoxAt(mark, 11.2), trackBoxAt(mark, 6.5), trackBoxAt(mark, 7.1)], [[5, 6, 7, 8], null, [1, 2, 3, 4]]);
+});

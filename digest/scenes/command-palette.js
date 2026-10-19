@@ -7,7 +7,7 @@ export default {
 	params: {
 		query: 'what is typed after ">", e.g. "Chat: Fork"',
 		typeAt: 'time the typing starts',
-		items: '[{ label, keybinding, isNew }]: the commands listed, in order (2-6); label as "Category: Title"',
+		items: '[{ label, keybinding, isNew }]: the commands listed, in order (2-6); label as "Category: Title"; isNew marks the ones the PR adds (their titles are checked against it)',
 		highlights: '[{ item: index, at }]: the selected item over time (optional; default the first)',
 		tab: 'the editor tab behind it (optional)',
 	},
@@ -28,7 +28,7 @@ export default {
 		const items = p.items ?? [];
 		page.innerHTML = `<div class="cp-under">${bars([520, 380, 460, 300, 420])}</div>
 			<div class="cp-box"><div class="cp-input">&gt;<span class="cp-typed"></span><span class="cp-caret"></span></div>
-				<div class="cp-list">${items.map((it, i) => `<div class="cp-item" data-i="${i}"><span class="cp-label">${esc(it.label)}</span>${it.isNew ? '<span class="cp-new">New</span>' : ''}${it.keybinding ? `<span class="cp-kb">${esc(it.keybinding)}</span>` : ''}</div>`).join('')}</div></div>`;
+				<div class="cp-list">${items.map((it, i) => `<div class="cp-item" data-i="${i}"><span class="cp-label">${esc(it.label)}</span>${it.keybinding ? `<span class="cp-kb">${esc(it.keybinding)}</span>` : ''}</div>`).join('')}</div></div>`;
 		fillIcons(page);
 		const box = page.querySelector('.cp-box'), input = page.querySelector('.cp-input'), list = page.querySelector('.cp-list');
 		const typedEl = page.querySelector('.cp-typed'), caret = page.querySelector('.cp-caret');

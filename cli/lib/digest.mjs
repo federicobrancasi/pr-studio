@@ -652,6 +652,11 @@ export async function checkDigest(slug) {
 			if (!kind) {
 				problems.push(`${id}: there is no scene "${scene.name}" (scenes: ${Object.keys(kit).join(', ')})`);
 			} else {
+				for (const key of Object.keys(scene.params ?? {})) {
+					if (!(key in kind.params)) {
+						problems.push(`${id}: the ${scene.name} scene has no "${key}" (it draws only what its params say: ${Object.keys(kind.params).join(', ')})`);
+					}
+				}
 				if (ch.focus && scene.name === 'card') {
 					problems.push(`${id}: a card has nothing to point at: remove "focus"`);
 				} else if (ch.focus && !kind.targets.includes(ch.focus)) {

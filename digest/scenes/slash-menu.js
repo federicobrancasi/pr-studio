@@ -9,7 +9,7 @@ export default {
 		placeholder: 'the input\'s placeholder, e.g. "Chat with Copilot"',
 		typed: 'what is typed, e.g. "/fork"',
 		typeAt: 'time the typing starts',
-		entries: '[{ label, description, isNew }]: the suggestions, in order (2-5)',
+		entries: '[{ label, description, isNew }]: the suggestions, in order (2-5); isNew marks the ones the PR adds (checked against it)',
 		listAt: 'time the list opens (default: when the typing ends)',
 		highlights: '[{ entry: index, at }]: the selected entry over time (optional)',
 		tab: 'the editor tab (optional)',
@@ -30,7 +30,7 @@ export default {
 		page.innerHTML = `
 			<div class="sm-chat">${bars([480, 620, 360], 'vsw-bar-line')}</div>
 			<div class="sm-box">
-				<div class="sm-list">${entries.map((e, i) => `<div class="sm-entry" data-i="${i}"><span class="sm-label">${esc(e.label)}</span><span class="sm-desc">${esc(e.description ?? '')}</span>${e.isNew ? '<span class="sm-new">New</span>' : ''}</div>`).join('')}</div>
+				<div class="sm-list">${entries.map((e, i) => `<div class="sm-entry" data-i="${i}"><span class="sm-label">${esc(e.label)}</span><span class="sm-desc">${esc(e.description ?? '')}</span></div>`).join('')}</div>
 				<div class="sm-input"><span class="sm-typed"></span><span class="sm-caret"></span><span class="sm-ph">${esc(p.placeholder ?? 'Ask anything')}</span></div>
 			</div>`;
 		fillIcons(page);
