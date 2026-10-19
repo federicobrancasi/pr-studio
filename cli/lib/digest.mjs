@@ -436,6 +436,117 @@ export function planDigest(slug) {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
+// Proofs: what a chapter shows must be the PR's own text
+
+/** Text as compared for proofs: case, spacing, mnemonics (&&), Markdown markers and escapes don't count. */
+export function proofText(text) {
+	return String(text ?? '').toLowerCase()
+		.replace(/&&/g, '')
+		.replace(/[\u2018\u2019]/g, '\'').replace(/[\u201c\u201d]/g, '"')
+		.replace(/\\[nrt]/g, ' ')
+		.replace(/[`*\\]/g, '')
+		.replace(/\s+/g, ' ')
+		.trim();
+}
+
+const escapeRegExp = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** A PR's text, as compared for proofs: its strings with placeholders ({0}) match any value shown in their place. */
+export function proofCorpus(raw) {
+	const templates = [];
+	for (const m of raw.matchAll(/"((?:[^"\\\n]|\\.)*\{\d+\}(?:[^"\\\n]|\\.)*)"|'((?:[^'\\\n]|\\.)*\{\d+\}(?:[^'\\\n]|\\.)*)'/g)) {
+		const parts = proofText(m[1] ?? m[2]).split(/\{\d+\}/);
+		if (parts.join('').trim().length >= 6) {
+			templates.push(new RegExp(`^${parts.map(escapeRegExp).join('.+?')}$`));
+		}
+	}
+	return { text: proofText(raw), templates };
+}
+
+/**
+ * Whether a string is the PR's: in its text, or one of its strings with values in place of the placeholders. A
+ * shortcut VS Code adds to a label ("New Chat (⌘T)", "Run (Ctrl+Enter)") is not part of it.
+ */
+export function inProof(corpus, text) {
+	const t = proofText(text).replace(/\s*\((?:[⌘⌥⇧⌃]|(?:ctrl|cmd|alt|shift|meta|option)\+)[^)]*\)$/, '');
+	return t.length > 0 && (corpus.text.includes(t) || corpus.templates.some(re => re.test(t)));
+}
+
+/** Everything a PR says: its title, its description, its diff and the files it changes, at its head (downloaded). */
+function prCorpus(prSlug, cache) {
+	if (!cache.has(prSlug)) {
+		const dir = videoDir(prSlug);
+		const pr = readJson(path.join(dir, 'pr.json'));
+		const parts = [pr.facts?.title ?? '', pr.body ?? ''];
+		if (fs.existsSync(path.join(dir, 'pr.diff'))) {
+			parts.push(fs.readFileSync(path.join(dir, 'pr.diff'), 'utf8'));
+		}
+		const walk = d => fs.existsSync(d) ? fs.readdirSync(d, { withFileTypes: true }).flatMap(e => e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]) : [];
+		for (const f of walk(path.join(buildDir(prSlug), 'src', pr.facts?.headSha9 ?? '-'))) {
+			if (fs.statSync(f).size < 4_000_000) {
+				parts.push(fs.readFileSync(f, 'utf8'));
+			}
+		}
+		cache.set(prSlug, proofCorpus(parts.join('\n')));
+	}
+	return cache.get(prSlug);
+}
+
+/** When a link's arrow starts, as the player does: its "from", or just after its row appears. */
+function linkStart(spec, link) {
+	if (link.from !== undefined) {
+		return link.from;
+	}
+	const rowAt = (rows, base, offset) => {
+		const i = (rows ?? []).findIndex(r => r.id === link.row);
+		return i < 0 ? undefined : rows[i].at ?? base + offset + 0.12 * i;
+	};
+	return (rowAt(spec.now?.rows, spec.now?.at, 0) ?? (spec.before ? rowAt(spec.before.rows, spec.before.at, 0.15) : undefined) ?? spec.now?.at) + 0.45;
+}
+
+/**
+ * When a link's arrow can be up: its from and until, and when its target is on screen (a scene's part: null when
+ * these params don't draw it; a demo's mark: as the player shows it, through the hold on the recording's last frame).
+ */
+function linkTiming(seg, link, kit) {
+	const spec = seg.spec;
+	const from = linkStart(spec, link), until = link.until ?? seg.end;
+	if (spec.scene) {
+		const w = kit[spec.scene.name]?.windows(spec.scene.params ?? {}, { start: seg.start, end: seg.end }) ?? {};
+		return { from, until, windows: w[link.target] ? [w[link.target]] : null, parts: w };
+	}
+	const last = seg.clip?.anchors?.at(-1)?.at ?? seg.end;
+	return { from, until, windows: (seg.targets[link.target]?.windows ?? []).map(([a, b]) => [a, b >= last - 0.02 ? seg.end : b]), parts: null };
+}
+
+/** The arrows that would ring nothing: a target these params don't draw, or one never on screen while the arrow is. */
+export function linkProblems(seg, kit) {
+	const problems = [];
+	const spec = seg.spec;
+	const fmt = x => x.toFixed(1);
+	for (const l of spec.links ?? []) {
+		if (spec.scene && !kit[spec.scene.name]) {
+			continue;
+		}
+		const { from, until, windows, parts } = linkTiming(seg, l, kit);
+		for (const other of parts ? [l.stop, l.also].filter(Boolean) : []) {
+			if (!parts[other]) {
+				problems.push(`${seg.id}: the arrow to "${l.target}" uses "${other}", which these ${spec.scene.name} params don't draw`);
+			}
+		}
+		if (!windows) {
+			problems.push(`${seg.id}: the arrow from "${l.row}" points to "${l.target}", which these ${spec.scene.name} params don't draw: it would ring nothing`);
+			continue;
+		}
+		const overlap = windows.reduce((sum, [a, b]) => sum + Math.max(0, Math.min(b, until) - Math.max(a, from)), 0);
+		if (overlap < 0.4) {
+			problems.push(`${seg.id}: the arrow from "${l.row}" (${fmt(from)}-${fmt(until)} s) is never up while "${l.target}" is on screen (${windows.map(([a, b]) => `${fmt(a)}-${fmt(b)} s`).join(', ') || 'never'}): move its from/until, or the scene's times`);
+		}
+	}
+	return problems;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
 // prs digest check
 
 export async function checkDigest(slug) {
@@ -456,11 +567,24 @@ export async function checkDigest(slug) {
 		problems.push(`the narration has ${words} words: cut it to about 150 (the video should run under a minute)`);
 	}
 	const kit = await loadSceneDocs();
-	for (const id of ids) {
+	const corpora = new Map();
+	for (const [i, id] of ids.entries()) {
 		const ch = digest.chapters?.[id];
 		if (!ch) {
 			problems.push(`digest.json: no chapter ${id}`);
 			continue;
+		}
+		const pick = picks.find(p => p.rank === ch.pick) ?? picks[i];
+		let corpus = null;
+		try {
+			corpus = prCorpus(pick.slug, corpora);
+		} catch (error) {
+			problems.push(`${id}: can't read #${pick.number} to check what the chapter shows (${error.message.split('\n')[0]})`);
+		}
+		const isPr = text => !corpus || inProof(corpus, text);
+		const where = `#${pick.number} (its diff, the files it changes, its title or description)`;
+		if (ch.setting?.name && !isPr(ch.setting.name)) {
+			problems.push(`${id}: the setting "${ch.setting.name}" is not in ${where}`);
 		}
 		const rowIds = new Set([...(ch.before?.rows ?? []), ...(ch.now?.rows ?? [])].map(r => r.id));
 		for (const l of ch.links ?? []) {
@@ -477,6 +601,14 @@ export async function checkDigest(slug) {
 				for (const t of (ch.links ?? []).flatMap(l => [l.target, l.stop, l.also]).filter(Boolean)) {
 					if (!kind.targets.includes(t)) {
 						problems.push(`${id}: "${t}" is not a target of the ${scene.name} scene (targets: ${kind.targets.join(', ')})`);
+					}
+				}
+				// A drawn UI shows the PR's own strings: a scene drawn with made-up text would show a UI that doesn't exist.
+				for (const proof of kind.proofs(scene.params ?? {})) {
+					if (!proof.text) {
+						problems.push(`${id}: the ${scene.name} scene needs ${proof.param}: the PR's own text (or show the change on a card)`);
+					} else if (!isPr(proof.text)) {
+						problems.push(`${id}: "${proof.text}" (${scene.name}, ${proof.param}) is not in ${where}: draw only the PR's own strings, or show the change on a card`);
 					}
 				}
 			}
@@ -512,6 +644,22 @@ export async function checkDigest(slug) {
 						problems.push(`${id}: mark "${m}" is never on screen in demo ${v.demo}: look at its contact sheet`);
 					}
 				}
+				// The demo shows the PR's UI: text from the PR, in a mark a Now row points to.
+				const proofs = [].concat(ch.proof ?? []);
+				const nowRows = new Set((ch.now?.rows ?? []).map(r => r.id));
+				const shown = (ch.links ?? []).filter(l => nowRows.has(l.row)).map(l => proofText(demo.marks[l.target]?.text)).join('\n');
+				if (!proofs.length) {
+					problems.push(`${id}: a demo needs "proof": text from #${pick.number} that it shows (a label, a setting's description, a command), in a mark a Now row points to`);
+				}
+				for (const proof of proofs) {
+					if (proofText(proof).length < 10) {
+						problems.push(`${id}: the proof "${proof}" is too short to prove anything: 10 characters or more`);
+					} else if (!isPr(proof)) {
+						problems.push(`${id}: the proof "${proof}" is not in ${where}`);
+					} else if (!shown.includes(proofText(proof))) {
+						problems.push(`${id}: no mark a Now row points to shows "${proof}": point one at the UI that says it (or this demo doesn't show the change: use a scene or a card)`);
+					}
+				}
 				for (const c of ch.camera ?? []) {
 					const r = c.focus && demo.marks[c.focus]?.rect;
 					const z = c.zoom ?? c.z;
@@ -527,7 +675,10 @@ export async function checkDigest(slug) {
 	if (fs.existsSync(path.join(bdir, 'timeline.json'))) {
 		try {
 			const { data } = planDigest(slug);
-			notes.push(`video: ${data.total.toFixed(1)} s (${data.segments.map(s => `${s.id} ${(s.end - s.start).toFixed(1)}`).join(', ')})`);
+			for (const seg of data.segments.filter(x => x.kind === 'chapter')) {
+				problems.push(...linkProblems(seg, kit));
+			}
+			notes.push(`video: ${data.total.toFixed(1)} s (${data.segments.map(x => `${x.id} ${(x.end - x.start).toFixed(1)}`).join(', ')})`);
 			if (data.total > 75) {
 				problems.push(`the video runs ${data.total.toFixed(1)} s: aim for 55-65 s (shorter narration, faster clips: clip.after)`);
 			}
@@ -546,13 +697,10 @@ export async function checkDigest(slug) {
 const esbuild = createRequire(path.join(ROOT, 'package.json'))('esbuild');
 
 async function buildPage(slug, data) {
-	const dir = videoDir(slug), pdir = path.join(buildDir(slug), 'digest', 'page');
+	const pdir = path.join(buildDir(slug), 'digest', 'page');
 	fs.mkdirSync(pdir, { recursive: true });
-	const own = fs.existsSync(path.join(dir, 'scenes')) ? fs.readdirSync(path.join(dir, 'scenes')).filter(f => f.endsWith('.js')) : [];
 	const entry = path.join(pdir, 'entry.js');
 	fs.writeFileSync(entry, [
-		...own.map((f, i) => `import own${i} from ${JSON.stringify(path.join(dir, 'scenes', f))};`),
-		`globalThis.DIGEST_SCENES = Object.fromEntries([${own.map((_, i) => `own${i}`).join(', ')}].map(s => [s.name, s]));`,
 		`import createPlayer from ${JSON.stringify(path.join(ROOT, 'digest', 'player.js'))};`,
 		'const player = createPlayer(document.getElementById(\'app\'), window.DATA);',
 		'window.seek = async t => player.seek(t);',
@@ -629,6 +777,27 @@ function keyMoments(data) {
 	return times;
 }
 
+/**
+ * The moment to review each chapter at: when its first Now arrow is fully drawn on its target (or its middle, with
+ * no arrow), so a still shows the UI, the arrow and what it points at together.
+ */
+function reviewMoments(data, kit) {
+	return data.segments.filter(s => s.kind === 'chapter').map(seg => {
+		const nowRows = new Set((seg.spec.now?.rows ?? []).map(r => r.id));
+		const link = (seg.spec.links ?? []).find(l => nowRows.has(l.row)) ?? seg.spec.links?.[0];
+		let t = (seg.start + seg.end) / 2;
+		if (link) {
+			const { from, until, windows } = linkTiming(seg, link, kit);
+			const w = (windows ?? []).find(([a, b]) => Math.min(b, until) > Math.max(a, from));
+			if (w) {
+				const a = Math.max(from, w[0]), b = Math.min(until, w[1]);
+				t = Math.min(a + 1.0, b - 0.1);
+			}
+		}
+		return { id: seg.id, t: r3(Math.max(seg.start + 0.6, Math.min(seg.end - 0.2, t))) };
+	});
+}
+
 export async function stillsDigest(slug, { at = null, workers = 3 } = {}) {
 	const { data } = planDigest(slug);
 	const html = await buildPage(slug, data);
@@ -637,9 +806,11 @@ export async function stillsDigest(slug, { at = null, workers = 3 } = {}) {
 	fs.mkdirSync(dir, { recursive: true });
 	const times = (at ?? keyMoments(data)).filter(t => t >= 0 && t <= data.total);
 	const shots = times.map((t, i) => ({ t, file: path.join(dir, `${String(i + 1).padStart(2, '0')}-${t.toFixed(2)}s.png`) }));
-	await capture(html, shots, 'png', workers);
+	// One full-size still per chapter, for the review: each must be opened (the contact sheet is too small to judge).
+	const review = at ? [] : reviewMoments(data, await loadSceneDocs()).map(m => ({ ...m, file: path.join(dir, `review-${m.id}.png`) }));
+	await capture(html, [...shots, ...review], 'png', workers);
 	grid(findFfmpeg(), shots.map(s => s.file), path.join(dir, 'contact.png'));
-	return { dir, shots, total: data.total };
+	return { dir, shots, review, total: data.total };
 }
 
 export async function renderDigest(slug, { workers = 3 } = {}) {
@@ -692,8 +863,8 @@ export async function renderDigest(slug, { workers = 3 } = {}) {
 	return { mp4: path.join(dest, `${slug}.mp4`), total: data.total, contact: path.join(out, 'contact.png') };
 }
 
-/** The scene kit's names, docs and params (the scenes bundled for Node: their icons are SVG files). */
-async function loadSceneDocs() {
+/** The scene kit, for Node: names, docs, params, windows and proofs (bundled: their icons are SVG files). */
+export async function loadSceneDocs() {
 	const out = path.join(ROOT, 'videos', '.scenes.node.mjs');
 	fs.mkdirSync(path.dirname(out), { recursive: true });
 	await esbuild.build({
@@ -734,9 +905,12 @@ export async function digestCommand(args) {
 		case 'stills': {
 			const slug = digestSlug(args._[1]);
 			const at = typeof args.at === 'string' ? args.at.split(',').map(Number) : null;
-			const { dir, shots, total } = await stillsDigest(slug, { at, workers: Number(args.workers ?? 3) });
+			const { dir, shots, review, total } = await stillsDigest(slug, { at, workers: Number(args.workers ?? 3) });
 			console.log(`video ${total.toFixed(1)} s; stills: ${shots.map(s => path.basename(s.file)).join(', ')}`);
 			console.log(`contact sheet: ${path.relative(process.cwd(), path.join(dir, 'contact.png'))}`);
+			if (review.length) {
+				console.log(`review: open each, full size (guides/digest.md, "Review"): ${review.map(r => `${path.relative(process.cwd(), r.file)} (${r.t.toFixed(2)} s)`).join(', ')}`);
+			}
 			return 0;
 		}
 		case 'render': {

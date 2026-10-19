@@ -15,6 +15,15 @@ export default {
 		tab: 'the editor tab (optional)',
 	},
 	targets: ['input', 'list', 'entry0', 'entry1', 'entry2', 'entry3', 'entry4'],
+	windows(p, { start, end }) {
+		const listAt = p.listAt ?? (p.typeAt ?? start) + String(p.typed ?? '').length * 0.07;
+		return { input: [start, end], list: [listAt, end], ...Object.fromEntries((p.entries ?? []).slice(0, 5).map((_, i) => [`entry${i}`, [listAt, end]])) };
+	},
+	/** The new entries: their description (as the PR localizes it), or their label. */
+	proofs: p => {
+		const fresh = (p.entries ?? []).map((e, i) => ({ e, i })).filter(x => x.e.isNew);
+		return fresh.length ? fresh.map(({ e, i }) => ({ param: `entries[${i}].${e.description ? 'description' : 'label'}`, text: e.description ?? e.label })) : [{ param: 'entries[].isNew', text: undefined }];
+	},
 	build(host, p, ctx) {
 		const { page } = vscodeWindow(host, { tab: p.tab ?? '', activity: ['chat', 'search', 'branch', 'extension'] });
 		const entries = p.entries ?? [];

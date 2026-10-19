@@ -221,7 +221,7 @@ export default function createPlayer(root, DATA) {
 	const caps = captions(root, DATA);
 	const progress = progressLine(root, DATA);
 	const cut = make(root, 'cut');
-	const scenes = { ...SCENES, ...(globalThis.DIGEST_SCENES ?? {}) };
+	const scenes = SCENES;
 
 	/** The strip items, links and camera of a chapter, from its spec (digest.json, times resolved). */
 	function planOf(seg, scene) {
@@ -245,18 +245,26 @@ export default function createPlayer(root, DATA) {
 		return { strip, links, camera: s.camera ?? [], scene };
 	}
 
-	/** A target's page rect at t: a demo's mark (through the camera) or a scene's piece. */
-	function rectOf(seg, plan, name, box) {
+	/** A target's page rect at t: a demo's mark (through the camera) or a scene's piece while it is on screen. */
+	function rectOf(seg, plan, name, box, t) {
 		if (seg.clip && seg.targets[name]) {
 			return targetBox(seg, name, box);
+		}
+		const w = plan.scene?.windows?.[name];
+		if (plan.scene?.windows && (!w || t < w[0] || t >= w[1])) {
+			return null;
 		}
 		return plan.scene?.rects?.[name] ?? null;
 	}
 
-	/** [from, to] of a link at t (clipped to a demo target's on-screen window), or null. */
-	function linkSpan(seg, link, t) {
+	/** [from, to] of a link at t (clipped to when its target is on screen: a demo's mark, a scene's piece), or null. */
+	function linkSpan(seg, plan, link, t) {
 		let a = link.from, b = link.until ?? seg.end;
-		if (seg.clip && seg.targets[link.target]) {
+		const sceneWindow = plan.scene?.windows ? plan.scene.windows[link.target] ?? [Infinity, -Infinity] : null;
+		if (sceneWindow) {
+			a = Math.max(a, sceneWindow[0]);
+			b = Math.min(b, sceneWindow[1]);
+		} else if (seg.clip && seg.targets[link.target]) {
 			// A window that lasts until the recording's end stays up through the hold on its last frame.
 			const last = seg.clip.anchors?.at(-1)?.at ?? seg.end;
 			const w = (seg.targets[link.target].windows ?? []).map(([x, y]) => [x, y >= last - 0.02 ? seg.end : y]).find(([x, y]) => t >= x && t < y);
@@ -271,9 +279,9 @@ export default function createPlayer(root, DATA) {
 
 	function drawLinks(seg, plan, t, box) {
 		for (const link of plan.links) {
-			const span = linkSpan(seg, link, t);
+			const span = linkSpan(seg, plan, link, t);
 			const row = plan.strip.rows[link.row];
-			const raw = span && row ? rectOf(seg, plan, link.target, box) : null;
+			const raw = span && row ? rectOf(seg, plan, link.target, box, t) : null;
 			if (!raw) {
 				continue;
 			}
@@ -285,13 +293,13 @@ export default function createPlayer(root, DATA) {
 			let endY;
 			if (link.also) {
 				// UI that opens right below the target (a tooltip): the arrow stops below it instead of crossing it.
-				const alsoSpan = linkSpan(seg, { target: link.also, from: a, until: b }, t);
-				const r2 = alsoSpan ? rectOf(seg, plan, link.also, box) : null;
+				const alsoSpan = linkSpan(seg, plan, { target: link.also, from: a, until: b }, t);
+				const r2 = alsoSpan ? rectOf(seg, plan, link.also, box, t) : null;
 				if (r2) {
 					endY = lerp(ring.y + ring.h, r2.y + r2.h + 4, decel(clamp((t - alsoSpan[0]) / 0.3))) + 3;
 				}
 			}
-			const stop = link.stop ? rectOf(seg, plan, link.stop, box) : null;
+			const stop = link.stop ? rectOf(seg, plan, link.stop, box, t) : null;
 			const pts = route(link, { x: COL.x + COL.w + 2, y: row.cy }, ring, endY, stop, plan.scene?.lane);
 			prim.connector(g, pts, { color: '#fff', width: 7.5, radius: 14 }).render(t, a, 0.5);
 			prim.connector(g, pts, { color, width: 3, radius: 14 }).render(t, a, 0.5);
@@ -321,6 +329,7 @@ export default function createPlayer(root, DATA) {
 				throw new Error(`Unknown scene "${s.scene.name}" in ${seg.id} (scenes: ${Object.keys(scenes).join(', ')})`);
 			}
 			scene = kind.build(sceneHost, s.scene.params ?? {}, { view: VIEW, start: seg.start, end: seg.end });
+			scene.windows = kind.windows(s.scene.params ?? {}, { start: seg.start, end: seg.end });
 		}
 		plan = planOf(seg, scene);
 	}

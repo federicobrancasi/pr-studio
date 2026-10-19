@@ -15,6 +15,12 @@ export default {
 		legendAt: 'time the legend appears',
 	},
 	targets: ['badge', 'tile'],
+	windows(p, { start, end }) {
+		const inAt = p.inAt ?? start + 0.3;
+		return { tile: [inAt, end], badge: [p.badgeAt ?? inAt, end] };
+	},
+	/** A count on the app icon: no string to prove. */
+	proofs: () => [],
 	build(host, p, ctx) {
 		host.classList.add('ab');
 		const view = ctx.view;

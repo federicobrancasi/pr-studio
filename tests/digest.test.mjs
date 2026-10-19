@@ -1,7 +1,7 @@
 // The changelog digest: its times (phrases of the narration, demo marks, steps) and the strip's height.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fitZoom, resolveTime, resolveTimes, stripHeight } from '../cli/lib/digest.mjs';
+import { fitZoom, inProof, linkProblems, loadSceneDocs, proofCorpus, resolveTime, resolveTimes, stripHeight } from '../cli/lib/digest.mjs';
 
 // A chapter that starts 10 s into the video: "Five. VS Code links can now add a plugin marketplace."
 const words = ['Five.', 'VS', 'Code', 'links', 'can', 'now', 'add', 'a', 'plugin', 'marketplace.']
@@ -57,4 +57,48 @@ test('the strip height counts every item and its gap, and a strip of E\'s last c
 test('a camera focused on a mark zooms as close as the mark still fits, between 1 and 2', () => {
 	// A settings row (wide), a button (small), and a whole window (no zoom).
 	assert.deepStrictEqual([fitZoom([353, 210, 774, 97.8]), fitZoom([742, 431, 114, 26]), fitZoom([0, 0, 1280, 720])], [1.41, 2, 1]);
+});
+
+test('a chapter\'s strings are the PR\'s: placeholders match the values shown, shortcuts and mnemonics don\'t count', () => {
+	const corpus = proofCorpus([
+		'+			message: localize(\'confirm\', "Add Marketplace \'{0}\' and Install Plugin \'{1}\'?"),',
+		'+			primaryButton: localize({ key: \'installButton\' }, "&&Install"),',
+		'+			markdownDescription: nls.localize(\'x\', "Includes the \\`copilot\\` command that ships with VS Code."),',
+		'+	title: localize(\'newNested\', "New Nested Session"),',
+	].join('\n'));
+	assert.deepStrictEqual([
+		"Add Marketplace 'github/awesome-copilot' and Install Plugin 'ai-ready'?",
+		'Install',
+		'Includes the copilot command that ships with VS Code',
+		'New Nested Session (⌘T)',
+		'New Nested Session (Ctrl+T)',
+		'GPT-5',
+		'Current-chat choice',
+		'',
+	].map(t => inProof(corpus, t)), [true, true, true, true, true, false, false, false]);
+});
+
+test('a drawn UI must be the PR\'s, and an arrow must point at a part that is drawn and on screen', async () => {
+	const kit = await loadSceneDocs();
+	const corpus = proofCorpus('+	title: localize(\'newNested\', "New Nested Session"),');
+	const sessions = { title: 'Sessions', rows: [{ label: 'Update the README' }], after: { icon: 'add', tooltip: 'New Nested Session' }, hoverAt: 11, tooltipAt: 12, child: { label: 'New Session', at: 14 } };
+	const fake = { title: 'Model picker', rows: [{ label: 'Auto', sub: 'Org default' }], after: { icon: 'document', tooltip: 'Org default' }, hoverAt: 11 };
+	const seg = (params, links) => ({ id: 'c4', start: 10, end: 20, targets: {}, spec: { now: { at: 11, rows: [{ id: 'new', text: 'x' }] }, scene: { name: 'list-actions', params }, links } });
+	assert.deepStrictEqual({
+		proofs: [sessions, fake].map(p => kit['list-actions'].proofs(p).map(x => inProof(corpus, x.text))),
+		windows: kit['list-actions'].windows(sessions, { start: 10, end: 20 }),
+		fakeWindows: Object.keys(kit['list-actions'].windows(fake, { start: 10, end: 20 })),
+		ok: linkProblems(seg(sessions, [{ row: 'new', target: 'tooltip' }, { row: 'new', target: 'child' }]), kit),
+		// c4: an arrow to the tooltip of a scene that never shows it, rings an empty box.
+		ringsNothing: linkProblems(seg(fake, [{ row: 'new', target: 'tooltip' }]), kit).length,
+		// An arrow that is gone before its target shows.
+		tooEarly: linkProblems(seg(sessions, [{ row: 'new', target: 'child', until: 13.5 }]), kit).length,
+	}, {
+		proofs: [[true], [false]],
+		windows: { row: [10, 20], action: [11, 20], tooltip: [12, 14], child: [14, 20] },
+		fakeWindows: ['row', 'action'],
+		ok: [],
+		ringsNothing: 1,
+		tooEarly: 1,
+	});
 });

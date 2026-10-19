@@ -13,6 +13,12 @@ export default {
 		label: 'the wipe\'s handle (default "Now")',
 	},
 	targets: ['before', 'after'],
+	/** When each part is on screen (seconds of the video), for the parts these params draw. */
+	windows(p, { start, end }) {
+		return p.swapAt === undefined ? { before: [start, end] } : { before: [start, p.swapAt + 0.45], after: [p.swapAt + 0.45, end] };
+	},
+	/** The strings that must come from the PR: what the new button says. */
+	proofs: p => [{ param: 'after.text', text: p.after?.text }],
 	build(host, p, ctx) {
 		const { page } = vscodeWindow(host, { tab: p.tab ?? 'Welcome' });
 		const content = btn => `

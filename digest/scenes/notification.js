@@ -13,6 +13,12 @@ export default {
 		tab: 'the editor tab behind it (optional)',
 	},
 	targets: ['toast', 'message', 'action0', 'action1', 'action2'],
+	windows(p, { start, end }) {
+		const at = p.showAt ?? start + 0.6;
+		return { toast: [at, end], message: [at, end], ...Object.fromEntries((p.actions ?? []).slice(0, 3).map((_, i) => [`action${i}`, [at, end]])) };
+	},
+	/** The message and its actions. */
+	proofs: p => [{ param: 'message', text: p.message }, ...(p.actions ?? []).map((a, i) => ({ param: `actions[${i}]`, text: a }))],
 	build(host, p, ctx) {
 		const { page } = vscodeWindow(host, { tab: p.tab ?? '' });
 		const sev = { info: ['info', '#3794ff'], warning: ['warning', '#cca700'], error: ['error', '#f14c4c'] }[p.severity ?? 'info'] ?? ['info', '#3794ff'];

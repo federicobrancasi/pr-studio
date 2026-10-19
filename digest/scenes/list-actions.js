@@ -19,6 +19,21 @@ export default {
 		tab: 'the editor tab (optional)',
 	},
 	targets: ['row', 'action', 'tooltip', 'child'],
+	windows(p, { start, end }) {
+		const w = { row: [start, end] };
+		if (p.hoverAt !== undefined) {
+			w.action = [p.hoverAt, end];
+		}
+		if (p.after?.tooltip && p.tooltipAt !== undefined) {
+			w.tooltip = [p.tooltipAt, p.child?.at ?? end];
+		}
+		if (p.child && p.child.at !== undefined) {
+			w.child = [p.child.at, end];
+		}
+		return w;
+	},
+	/** The new action's tooltip: what makes this the PR's action. */
+	proofs: p => [{ param: 'after.tooltip', text: p.after?.tooltip }],
 	build(host, p, ctx) {
 		const { page, side } = vscodeWindow(host, { tab: p.tab ?? '', activity: ['chat', 'search', 'branch', 'extension'], sidebar: 400 });
 		const rows = p.rows ?? [];

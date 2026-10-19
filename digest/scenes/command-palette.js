@@ -12,6 +12,17 @@ export default {
 		tab: 'the editor tab behind it (optional)',
 	},
 	targets: ['input', 'list', 'item0', 'item1', 'item2', 'item3', 'item4', 'item5'],
+	windows(p, { start, end }) {
+		const typeAt = p.typeAt ?? start + 0.5;
+		const listAt = typeAt + String(p.query ?? '').length * 0.06;
+		return { input: [typeAt - 0.3, end], list: [listAt, end], ...Object.fromEntries((p.items ?? []).slice(0, 6).map((_, i) => [`item${i}`, [listAt, end]])) };
+	},
+	/** The new commands (or the first one): their title, without the category ("Chat: Fork" proves "Fork"). */
+	proofs: p => {
+		const items = (p.items ?? []).map((it, i) => ({ it, i }));
+		const fresh = items.filter(x => x.it.isNew);
+		return (fresh.length ? fresh : items.slice(0, 1)).map(({ it, i }) => ({ param: `items[${i}].label`, text: String(it.label ?? '').split(': ').at(-1) }));
+	},
 	build(host, p, ctx) {
 		const { page } = vscodeWindow(host, { tab: p.tab ?? '' });
 		const items = p.items ?? [];

@@ -13,7 +13,8 @@ Everything runs through the CLI: `node cli/prs.mjs <command>` from the repo root
 ## Start
 
 - **The daily changelog digest** (one video of the top five picks of a #changelog report)? It is its own format:
-  follow [guides/digest.md](guides/digest.md) instead of the workflow below.
+  follow [guides/digest.md](guides/digest.md) only, with its own rules for runs nobody watches. The workflow and the
+  guides below (unattended, story, visuals, review, the pr-director agent) are for PR explainers.
 - **Nobody watching** (a GitHub Actions job)? Read [guides/unattended.md](guides/unattended.md) first: no
   questions, a time limit, one review round, where the result goes.
 - **Started from Slack (@GitHub, a cloud session)?** Read [guides/slack.md](guides/slack.md) first: triage, the

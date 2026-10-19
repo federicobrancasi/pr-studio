@@ -92,10 +92,101 @@ function killProfileProcesses(marker) {
 }
 
 /**
+ * The fonts VS Code renders with on Linux: it looks like VS Code on a Mac (Inter is close to SF, and Menlo is based
+ * on DejaVu Sans Mono). `packages` installs them on Ubuntu.
+ */
+export const LINUX_FONTS = { ui: 'Inter', mono: 'DejaVu Sans Mono', packages: 'fonts-inter fonts-dejavu-core fonts-dejavu-mono' };
+
+/** fontconfig's default rules as Ubuntu enables them, minus colored sub-pixel edges (a recording is scaled). */
+const FONT_RULES = {
+	before: ['10-hinting-slight', '10-scale-bitmap-fonts', '10-sub-pixel-none', '10-yes-antialias', '20-unhint-small-vera', '30-metric-aliases', '40-nonlatin', '45-generic', '45-latin', '48-spacing', '49-sansserif'],
+	after: ['60-generic', '60-latin', '65-fonts-persian', '65-nonlatin', '69-unifont', '70-no-bitmaps-except-emoji', '80-delicious', '90-synthetic'],
+};
+
+/**
+ * pr-studio's font configuration for VS Code on Linux. It doesn't depend on /etc/fonts (a sandbox such as gh-aw's
+ * doesn't mount it, and without its rules "sans-serif" and "monospace" map to no font: VS Code then renders in a
+ * serif, and its terminal in a font that isn't monospaced). The system's default rules, then pr-studio's, before
+ * 60-latin so they come first: the families VS Code asks for on Linux map to LINUX_FONTS.
+ */
+export function fontConfig({ cache, fonts = LINUX_FONTS, dirs = ['/usr/share/fonts', '/usr/local/share/fonts'], rules = '/usr/share/fontconfig/conf.avail' } = {}) {
+	const include = names => names.map(n => `\t<include ignore_missing="yes">${rules}/${n}.conf</include>`);
+	const prefer = (families, list) => families.map(f => `\t<alias binding="strong"><family>${f}</family><prefer>${list.map(x => `<family>${x}</family>`).join('')}</prefer></alias>`);
+	return [
+		'<?xml version="1.0"?>',
+		'<!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">',
+		'<fontconfig>',
+		...dirs.map(d => `\t<dir>${d}</dir>`),
+		`\t<cachedir>${cache}</cachedir>`,
+		...include(FONT_RULES.before),
+		...prefer(['sans-serif', 'sans', 'system-ui', 'Ubuntu', 'Droid Sans'], [fonts.ui, 'DejaVu Sans', 'Liberation Sans']),
+		...prefer(['monospace', 'mono', 'Droid Sans Mono', 'Ubuntu Mono'], [fonts.mono, 'Liberation Mono']),
+		...prefer(['serif'], ['DejaVu Serif', 'Liberation Serif']),
+		...include(FONT_RULES.after),
+		'</fontconfig>',
+		'',
+	].join('\n');
+}
+
+/** On Linux, what is wrong with the fonts VS Code renders with: none when they are LINUX_FONTS. */
+export function fontProblems(fonts, platform = process.platform) {
+	if (platform !== 'linux') {
+		return [];
+	}
+	const problems = [];
+	if (!new RegExp(`^${LINUX_FONTS.ui}\\b`, 'i').test(fonts?.ui ?? '')) {
+		problems.push(`its UI renders in ${fonts?.ui ?? 'no font'}, not ${LINUX_FONTS.ui}`);
+	}
+	if ((fonts?.mono ?? '').toLowerCase() !== LINUX_FONTS.mono.toLowerCase()) {
+		problems.push(`its code renders in ${fonts?.mono ?? 'no font'}, not ${LINUX_FONTS.mono}`);
+	}
+	return problems;
+}
+
+/** The fonts VS Code renders its UI and its code with: DevTools' platform fonts of two sample texts in the window. */
+export async function renderedFonts(page) {
+	await page.evaluate(() => {
+		const workbench = document.querySelector('.monaco-workbench') ?? document.body;
+		// A file's editor (not the chat input's, in the UI font) when one is open, otherwise VS Code's default editor
+		// fonts: the terminal uses the same.
+		const editor = document.querySelector('.part.editor .monaco-editor .view-lines');
+		const mono = editor ? getComputedStyle(editor).fontFamily : navigator.platform.startsWith('Mac') ? 'Menlo, Monaco, "Courier New", monospace' : navigator.platform.startsWith('Win') ? 'Consolas, "Courier New", monospace' : '"Droid Sans Mono", "monospace", monospace';
+		for (const [id, family] of [['prs-font-ui', null], ['prs-font-mono', mono]]) {
+			document.getElementById(id)?.remove();
+			const el = document.createElement('span');
+			el.id = id;
+			el.textContent = 'Explorer Search Settings 0123456789';
+			el.style.cssText = `position:fixed;left:-4000px;top:0;font-size:13px;white-space:nowrap;${family ? `font-family:${family};` : ''}`;
+			workbench.appendChild(el);
+		}
+	});
+	const cdp = await page.context().newCDPSession(page);
+	try {
+		await cdp.send('DOM.enable');
+		await cdp.send('CSS.enable');
+		const { root } = await cdp.send('DOM.getDocument', { depth: 0 });
+		const out = {};
+		for (const [key, id] of [['ui', 'prs-font-ui'], ['mono', 'prs-font-mono']]) {
+			const { nodeId } = await cdp.send('DOM.querySelector', { nodeId: root.nodeId, selector: `#${id}` });
+			const { fonts } = await cdp.send('CSS.getPlatformFontsForNode', { nodeId });
+			out[key] = [...fonts].sort((a, b) => b.glyphCount - a.glyphCount)[0]?.familyName ?? null;
+		}
+		return out;
+	} finally {
+		await cdp.detach().catch(() => { });
+		await page.evaluate(() => {
+			for (const id of ['prs-font-ui', 'prs-font-mono']) {
+				document.getElementById(id)?.remove();
+			}
+		}).catch(() => { });
+	}
+}
+
+/**
  * Linux: what VS Code needs that a sandbox (gh-aw's agent firewall) changes. Its own runtime directory (it puts its
- * sockets there, and shows a blocking dialog when the inherited one is not writable), fonts it can find (the
- * sandbox's fontconfig finds no config), and the system's libraries rather than the copies of headless Chrome's that
- * the sandbox puts first (VS Code starts outside the sandbox with the system's). LD_PRELOAD is left alone.
+ * sockets there, and shows a blocking dialog when the inherited one is not writable), pr-studio's font configuration
+ * (fontConfig), and the system's libraries rather than the copies of headless Chrome's that the sandbox puts first
+ * (VS Code starts outside the sandbox with the system's). LD_PRELOAD is left alone.
  */
 export function prepareLinuxEnv(env, tmp) {
 	const run = path.join(tmp, 'run');
@@ -109,14 +200,10 @@ export function prepareLinuxEnv(env, tmp) {
 			delete env.LD_LIBRARY_PATH;
 		}
 	}
-	if (fs.existsSync('/etc/fonts/fonts.conf')) {
-		env.FONTCONFIG_FILE = '/etc/fonts/fonts.conf';
-	} else {
-		const conf = path.join(tmp, 'fonts.conf');
-		const dirs = ['/usr/share/fonts', '/usr/local/share/fonts'].filter(d => fs.existsSync(d));
-		fs.writeFileSync(conf, `<?xml version="1.0"?>\n<!DOCTYPE fontconfig SYSTEM "fonts.dtd">\n<fontconfig>\n${dirs.map(d => `\t<dir>${d}</dir>\n`).join('')}\t<cachedir>${path.join(tmp, 'fontconfig')}</cachedir>\n</fontconfig>\n`);
-		env.FONTCONFIG_FILE = conf;
-	}
+	const conf = path.join(tmp, 'fonts.conf');
+	fs.writeFileSync(conf, fontConfig({ cache: path.join(tmp, 'fontconfig') }));
+	env.FONTCONFIG_FILE = conf;
+	delete env.FONTCONFIG_PATH;
 }
 
 /** Linux: the whole X display as a PNG (a dialog VS Code is stuck on), when xwd and ffmpeg are there. */
@@ -214,6 +301,8 @@ export async function openVSCode({ files = {}, settings = {}, signedIn = process
 			'workbench.tips.enabled': false,
 			'extensions.autoCheckUpdates': false,
 			'extensions.autoUpdate': false,
+			// The terminal's text in the page (not a GPU canvas): a mark on it records what it says.
+			'terminal.integrated.gpuAcceleration': 'off',
 			...settings,
 		});
 		for (const [name, content] of Object.entries(files)) {
@@ -265,6 +354,14 @@ export async function openVSCode({ files = {}, settings = {}, signedIn = process
 		process.off('SIGINT', onSignal);
 		process.off('SIGTERM', onSignal);
 		throw error;
+	}
+}
+
+/** VS Code started, but renders with the wrong fonts (Linux): a recording would look broken. */
+export class FontError extends Error {
+	constructor(problems, fonts) {
+		super(`VS Code ${problems.join(', and ')}: a recording would look broken. Install the fonts (sudo apt-get install ${LINUX_FONTS.packages})`);
+		this.fonts = fonts;
 	}
 }
 
@@ -427,7 +524,9 @@ function measure(elements, text) {
 			r = range.getBoundingClientRect();
 		}
 		if (r.width > 0 && r.height > 0) {
-			return { x: r.x, y: r.y, width: r.width, height: r.height };
+			// What it says (or the marked words): a demo proves it shows the PR's UI with it.
+			const said = text ?? (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 4000);
+			return { x: r.x, y: r.y, width: r.width, height: r.height, text: said };
 		}
 	}
 	return null;
@@ -493,9 +592,12 @@ function summarizeMarks(marks, t0, duration) {
 		}
 		const longest = kept.reduce((a, b) => (b.to - b.from > a.to - a.from ? b : a));
 		const box = longest.boxes[Math.floor(longest.boxes.length / 2)];
+		// Everything it said while on screen (a terminal fills up, a list filters): each different text once.
+		const texts = [...new Set(kept.flatMap(w => w.boxes.map(b => b.text)).filter(Boolean))];
 		out[name] = {
 			rect: [box.x, box.y, box.width, box.height].map(v => +v.toFixed(1)),
 			visible: kept.map(w => [Math.max(0, w.from), Math.min(duration, w.to)].map(v => +v.toFixed(2))),
+			text: texts.join('\n').slice(0, 20000),
 		};
 	}
 	return out;
@@ -549,21 +651,27 @@ export async function demoCheck() {
 	try {
 		build = buildInfo();
 		const vscode = await openVSCode({ files: { 'README.md': '# Check\n' }, log: () => { }, failureShot: base + '.png' });
+		let fonts;
 		try {
 			if (process.platform !== 'darwin') {
 				await skipOnboarding(vscode.page);
 			}
 			await vscode.page.screenshot({ path: base + '.png' });
+			fonts = await renderedFonts(vscode.page);
 		} finally {
 			await vscode.close();
 		}
 		const seconds = +((Date.now() - t0) / 1000).toFixed(1);
-		writeJson(base + '.json', { ok: true, build, seconds, at: new Date().toISOString() });
-		console.log(`demos work here: ${build.name ?? 'VS Code'} ${build.version ?? ''} started in ${seconds} s (${base}.png)`);
+		const problems = fontProblems(fonts);
+		if (problems.length) {
+			throw new FontError(problems, fonts);
+		}
+		writeJson(base + '.json', { ok: true, build, fonts, seconds, at: new Date().toISOString() });
+		console.log(`demos work here: ${build.name ?? 'VS Code'} ${build.version ?? ''} started in ${seconds} s, its UI in ${fonts.ui}, its code in ${fonts.mono} (${base}.png)`);
 		return true;
 	} catch (error) {
 		fs.writeFileSync(base + '.log', error.log ?? String(error.stack ?? error));
-		writeJson(base + '.json', { ok: false, build, error: error.message.split('\n')[0], at: new Date().toISOString() });
+		writeJson(base + '.json', { ok: false, build, ...(error.fonts ? { fonts: error.fonts } : {}), error: error.message.split('\n')[0], at: new Date().toISOString() });
 		console.log(`demos don't work here: ${error.message}\n(the whole log: ${base}.log) Draw every chapter as a scene.`);
 		return false;
 	}
@@ -602,11 +710,18 @@ export async function demo(slug, id, { signedIn = process.platform === 'darwin' 
 	const ctx = helpers(page, app);
 	ctx.scheme = build.quality === 'insider' ? 'vscode-insiders' : 'vscode';
 	ctx.workspace = vscode.workspace;
-	let recording = null, tracker = null;
+	let recording = null, tracker = null, fonts = null;
 	const steps = [];
 	try {
 		if (!signedIn) {
 			await skipOnboarding(page);
+		}
+		fonts = await renderedFonts(page);
+		const problems = fontProblems(fonts);
+		if (problems.length) {
+			const error = new FontError(problems, fonts);
+			fs.appendFileSync(failures, `${new Date().toISOString()} demo ${id}\n${error.message}\n=====\n`);
+			throw error;
 		}
 		if (typeof mod.setup === 'function') {
 			await mod.setup({ ...ctx, mark: () => { }, step: () => { } });
@@ -643,13 +758,13 @@ export async function demo(slug, id, { signedIn = process.platform === 'darwin' 
 		fs.rmSync(raw, { recursive: true, force: true });
 		const info = {
 			id, fps: FPS, count, duration: +(count / FPS).toFixed(2), size: [SIZE.width, SIZE.height], scale: 2,
-			build, signedIn, recorded: new Date().toISOString(),
+			build, signedIn, fonts, recorded: new Date().toISOString(),
 			steps: steps.map(s => ({ ...s, t: Math.max(0, +(s.t - (first - start)).toFixed(2)) })),
 			marks: summarizeMarks(marks, first, count / FPS),
 		};
 		writeJson(path.join(out, 'demo.json'), info);
 		await demoContact(out, info, path.join(out, 'contact.png'));
-		log(`recorded ${info.duration} s (${count} frames) in ${build.name}${build.version ? ` ${build.version}` : ''}`);
+		log(`recorded ${info.duration} s (${count} frames) in ${build.name}${build.version ? ` ${build.version}` : ''}, its UI in ${fonts?.ui}, its code in ${fonts?.mono}`);
 		for (const [name, m] of Object.entries(info.marks)) {
 			log(`  mark ${name}: ${m.rect ? `[${m.rect.join(', ')}] visible ${m.visible.map(([a, b]) => `${a}-${b} s`).join(', ')}` : 'NEVER VISIBLE: check the locator'}`);
 		}

@@ -16,6 +16,11 @@ export default {
 		badge: 'a small label beside the title, e.g. "Default changed" or "New" (optional)',
 	},
 	targets: ['row', 'value', 'description'],
+	windows(p, { start, end }) {
+		return { row: [start, end], value: [start, end], description: [start, end] };
+	},
+	/** The setting's ID and, when shown, its description. */
+	proofs: p => [{ param: 'id', text: p.id }, ...(p.description ? [{ param: 'description', text: p.description }] : [])],
 	build(host, p, ctx) {
 		const { page } = vscodeWindow(host, { tab: 'Settings', tabIcon: 'settings' });
 		const title = p.title ?? String(p.id ?? '').split('.').map(s => s.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, c => c.toUpperCase())).join(' › ');

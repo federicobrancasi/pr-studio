@@ -24,12 +24,16 @@ the words and choose what to show.
    - outro: `That's today's changelog. The full list is in the changelog channel.`
    - then `prs voice <slug>` (the local voice: about a minute).
 4. **The visual of each chapter** (`digest.json` → `visual`), see below: **try a demo first** for every change a
-   signed-out user can see, a scene otherwise. First run `prs demo check` (about 20 s): if VS Code doesn't start
-   here, draw every chapter as a scene and write its error in `notes.md`. Record demos with
-   `prs demo <id> --slug <slug>`, and look at each demo's `contact.png`.
-5. **The strip, the links and the timing** in `digest.json`, then `prs digest check <slug>` until it passes.
-6. `prs digest stills <slug>`: look at its contact sheet **once**, fix what is wrong, then `prs digest render <slug>`.
-   It delivers the mp4, its captions, `contact.png` and `<slug>.json` to the delivery folder (`PRS_DELIVER`).
+   signed-out user can see; a scene when the UI can't be recorded; a card when there is no UI to show. First run
+   `prs demo check` (about 20 s): if VS Code doesn't start here, or renders with the wrong fonts, record nothing:
+   scenes and cards, with the error in `notes.md`. Record demos with `prs demo <id> --slug <slug>`, and look at each
+   demo's `contact.png`.
+5. **The strip, the links and the timing** in `digest.json`, then `prs digest check <slug>` until it passes. It
+   checks that each visual shows the PR's change (its `proof`, the strings a scene draws), and that every arrow
+   points at something on screen.
+6. `prs digest stills <slug>`, then the review (below): open each chapter's still at full size, fix what is wrong,
+   then `prs digest render <slug>`. It delivers the mp4, its captions, `contact.png` and `<slug>.json` to the delivery
+   folder (`PRS_DELIVER`).
 
 ## Demo or scene
 
@@ -45,9 +49,18 @@ user could see the change in a fresh window, and if so, write its demo and recor
 Settings changes almost always can (a new setting, a new default, a new description: the Settings editor, below),
 and so can commands, keybindings, dialogs and links. Decide from the recording, not from guessing.
 
+**A demo proves itself**: its `proof` is text from the PR (a label, a setting's description, a command title) that
+the recording shows, in a mark a Now row's arrow points to (`prs demo` records what each mark says). A recording of
+VS Code that doesn't show the change (the chat view for a telemetry change) proves nothing: `prs digest check`
+rejects it.
+
 **A scene** draws the UI the change is about, from the PR's real strings: when the change needs a sign-in, the
-network, an extension, another OS or the Stable build, or when the demo doesn't show it. `prs digest scenes` lists
-them with their params and targets:
+network, an extension, another OS or the Stable build, or when the demo doesn't show it. A scene draws only the UI
+its row below names, never another one (a session list made to look like a model picker is a UI that doesn't exist).
+The strings that show the change (the new button, the new entry, the dialog's message, the setting) must be the PR's:
+in its diff, the files it changes, its title or description; `prs digest check` looks them up. Example data around
+the change (session titles in a list, a file name) can be made up; the change can't. `prs digest scenes` lists the
+scenes with their params and targets:
 
 | Scene | For |
 |-------|-----|
@@ -59,12 +72,18 @@ them with their params and targets:
 | `setting` | a setting whose default or value changes, or a new setting |
 | `command-palette` | the Command Palette with a new or renamed command, or a new keybinding |
 | `notification` | a notification toast and its actions |
+| `card` | a change with no UI to show: the change in words, with its setting or command (no UI) |
 
 Never fake a recording: a scene is a drawing, and that's fine. Never draw what the PR doesn't show either.
 
-**A change with no UI of its own** (a default behind the scenes, telemetry, an internal rename): say plainly what it
-changes for users, and show the closest real UI it applies to (its setting, the view it runs in), never UI the PR
-doesn't add. If nothing a user sees changes, say that in the narration ("Nothing changes on screen: ...").
+**A change with no UI to show** (telemetry, a default applied behind the scenes, a behavior only a signed-in or
+managed session has, an internal rename): a `card`. Its title says the change for users, its lines the details, and
+its setting or command in mono (the PR's own). Say plainly in the narration what changes for users, and if nothing
+on screen changes, say so ("Nothing changes on screen: ..."). Never record or draw another UI for it: not the view it
+runs in, not a scene made to look like the UI it would affect.
+
+**Shortcuts:** CI records VS Code on Linux, where a shortcut reads Ctrl+T, not ⌘T. Next to a recording, write a
+shortcut as the recording shows it.
 
 ## Demo scripts
 
@@ -95,8 +114,13 @@ export default async function demo({ page, run, openUrl, click, moveTo, type, pr
   its UI (filter by its text). Marks are what arrows point at.
 - Slow enough to read: pause about 1.5 s on what matters. A demo of 8-15 s is plenty.
 - Never change anything outside the throwaway profile: cancel install and sign-in dialogs.
-- **Check its contact sheet**: is the change on screen, and is each mark's box on the right UI? If the demo fails
-  twice, or doesn't show the change, use a scene and write why in `notes.md`.
+- **Check its contact sheet**: is the change on screen, is each mark's box on the right UI, and is the text
+  readable (no serif, no spaced-out letters: wrong fonts)? If the demo fails twice, or doesn't show the change, use a
+  scene or a card and write why in `notes.md`.
+- `prs demo` stops when VS Code renders with the wrong fonts on Linux (it measures them: Inter for the UI, DejaVu
+  Sans Mono for code). A recording with the wrong fonts looks broken: never work around it.
+- In `digest.json`, the demo's chapter gives `"proof"`: text from the PR the demo shows, in a mark a Now row points
+  to, e.g. `"proof": "Plugins can run code on your machine"` for the mark `warning` above.
 
 A setting in the Settings editor (it opens over the window: press Escape before clicking anything behind it):
 
@@ -162,6 +186,7 @@ A chapter with a demo (Oct 19, #342430): no verified before, so "before" lists t
 		{ "id": "a2", "style": "button", "tone": "blue", "text": "Add Marketplace and Install", "at": { "mark": "dialog2" } },
 		{ "id": "warn", "tone": "orange", "icon": "warning", "text": "Plugins can run code on your machine.", "at": { "cue": "plugins can run code", "offset": -0.1 } } ] },
 	"visual": { "demo": "c5" },
+	"proof": "Plugins can run code on your machine",
 	"clip": {
 		"anchors": [
 			{ "at": "add a plugin marketplace", "clip": { "mark": "dialog1" } },
@@ -173,6 +198,23 @@ A chapter with a demo (Oct 19, #342430): no verified before, so "before" lists t
 		{ "row": "a2", "target": "dialog2.primary", "until": "plugins can run code", "stop": "dialog2", "tone": "blue", "pad": 5 },
 		{ "row": "warn", "target": "dialog2.warning", "from": { "cue": "plugins can run code", "offset": 0.05 }, "stop": "dialog2", "tone": "orange", "thin": true, "pad": 1 } ],
 	"recap": { "before": null, "now": "Plugin links that ask first" }
+}
+```
+
+A chapter with a card (a change with no UI to show):
+
+```json
+"c3": {
+	"pick": 3,
+	"headline": "Copilot chats count as interactive sessions",
+	"eyebrow": "Agent Host chats",
+	"now": { "at": "now count", "rows": [{ "id": "new", "icon": "chart", "text": "Interactive-user sessions" }] },
+	"visual": { "scene": { "name": "card", "params": {
+		"icon": "chart",
+		"title": "Agent Host chats are interactive sessions",
+		"lines": [{ "text": "For the runtime's interactive analytics" }, { "text": "Nothing changes on screen" }] } } },
+	"links": [{ "row": "new", "target": "title" }],
+	"recap": { "before": null, "now": "Interactive-user sessions" }
 }
 ```
 
@@ -189,19 +231,29 @@ A chapter with a demo (Oct 19, #342430): no verified before, so "before" lists t
   only while it is on screen). Options: `tone` (green, blue, orange, neutral), `pad` (the ring around the target),
   `stop` (the arrow stops at that target's edge: a dialog), `also` (stops below it: a tooltip), `route` (`h`, `up`,
   `down`, `lane`), `round`, `thin`. One or two links per chapter, each while the narration names that UI.
-- **visual**: `{ "demo": "c5" }` or `{ "scene": { "name": "...", "params": { ... } } }` (times in params too).
+- **visual**: `{ "demo": "c5" }` or `{ "scene": { "name": "...", "params": { ... } } }` (times in params too). A demo's
+  chapter also gives **proof** (a string, or a list): the PR's text it shows.
+- An arrow shows only while its target is on screen; `prs digest check` rejects one that points at a part the scene's
+  params don't draw (a tooltip without `tooltipAt`), or that is never up while its target is.
 - **clip** (demos): `anchors` pin moments of the recording to the narration (the recording plays faster or slower
   between them), `end` stops it (it holds its last frame), `after` is the speed after the last anchor.
 - **camera** (demos): zoom moves `{ at, focus: "mark" }` (centered on that mark, as close as it fits; `zoom` to set
   it) or `{ at, dur, zoom, fx, fy }` (fx, fy in the 1280×720 window). Zoom on the UI that changed; not on a scene.
 - **recap**: the outro's line, `{ before, now, mono }`: `before: null` shows "New".
 
-## Before you render
+## Review
 
+`prs digest stills` writes `review-c1.png` … `review-c5.png`: each chapter at the moment its first Now arrow is up.
+Open **each one at full size** (the contact sheet is too small to judge text and arrows), and fix what fails:
+
+- Is the UI on the right the one the PR changes: a recording of it, a drawing of it, or a card? Not another UI.
+- Does each arrow ring the thing the row names: not empty space, not something next to it?
+- Is all the text readable: no serif or spaced-out letters in a recording, nothing cut off or overlapping?
 - Every string on screen is in `facts.md`; every before → after is shown by the diff.
 - The headline, the strip and the narration say the same thing.
-- Each arrow lands on the right UI in the stills (rings around the thing, not next to it).
 - 55-65 s in all (`prs digest check` prints the length of each chapter); no chapter is silent for long.
+
+The pr-director agent reviews PR explainers, not this format: don't use it for the digest.
 
 ## Runs nobody watches
 
@@ -212,7 +264,7 @@ The daily job in GitHub Actions: nobody reads your messages until it's over, and
 - **Time:** aim for 40 minutes, stop at 60. When the same step fails twice the same way (a demo, a check, the
   render), write what failed and the error in `notes.md`, and take the fallback: a scene instead of a demo. When
   VS Code doesn't start at all (`prs demo check`, or "VS Code did not start"), don't retry: scenes for every chapter.
-- **Look once:** open each demo's contact sheet and the stills' contact sheet, not every frame.
+- **Look:** each demo's contact sheet, then the five review stills at full size, not every frame.
 - **Leave pr-studio as it is:** no commits, and no changes to the CLI, the player, the scenes or the guides. If
   something in them is broken, say so in `notes.md`.
 - **No internet** (`PRS_OFFLINE`): the report and every PR were downloaded before you started; everything comes from

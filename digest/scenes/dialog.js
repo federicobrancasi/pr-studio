@@ -15,6 +15,26 @@ export default {
 		tab: 'the editor tab behind it (optional)',
 	},
 	targets: ['dialog', 'title', 'highlight', 'primary', 'cancel'],
+	windows(p, { start, end }) {
+		const at = p.showAt ?? start + 0.6;
+		const w = { dialog: [at, end], title: [at, end] };
+		if ((p.buttons ?? []).some(b => b.primary)) {
+			w.primary = [at, end];
+		}
+		if ((p.buttons ?? []).some(b => !b.primary)) {
+			w.cancel = [at, end];
+		}
+		if (/\*\*(.+?)\*\*/.test(p.detail ?? '')) {
+			w.highlight = [at, end];
+		}
+		return w;
+	},
+	/** The dialog's message, its marked sentence and its primary button. */
+	proofs: p => [
+		{ param: 'title', text: p.title },
+		...(/\*\*(.+?)\*\*/.test(p.detail ?? '') ? [{ param: 'detail (**marked**)', text: p.detail.match(/\*\*(.+?)\*\*/)[1] }] : []),
+		...(p.buttons ?? []).filter(b => b.primary).map(b => ({ param: 'buttons[primary].label', text: b.label })),
+	],
 	build(host, p, ctx) {
 		const { page } = vscodeWindow(host, { tab: p.tab ?? '' });
 		const detail = esc(p.detail ?? '').replace(/\*\*(.+?)\*\*/, '<span class="dl-mark">$1</span>');

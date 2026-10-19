@@ -102,6 +102,16 @@
 
 /* app-badge: a light desktop with a dock */
 .ab { background: linear-gradient(180deg, #fdfdfe 0%, #f2f6fc 55%, #e3ecf8 100%); }
+/* card: the change in words (no UI to show), on the same light backdrop */
+.cd { background: linear-gradient(180deg, #fdfdfe 0%, #f2f6fc 55%, #e3ecf8 100%); display: flex; align-items: center; justify-content: center; }
+.cd-glow { position: absolute; left: 50%; top: 60px; width: 1000px; height: 560px; margin-left: -500px; border-radius: 50%; background: radial-gradient(closest-side, rgba(0, 120, 212, .10), rgba(0, 120, 212, 0)); }
+.cd-card { position: relative; width: 980px; padding: 44px 52px 48px; border-radius: 24px; background: #fff; border: 1.5px solid var(--line); box-shadow: 0 22px 50px rgba(27, 27, 31, .12); opacity: 0; }
+.cd-head { display: flex; align-items: center; gap: 24px; }
+.cd-icon { flex: none; width: 76px; height: 76px; border-radius: 50%; background: var(--blue); display: grid; place-items: center; }
+.cd-title { font-size: 37px; font-weight: 700; line-height: 1.2; color: var(--ink); }
+.cd-lines { display: flex; flex-direction: column; gap: 18px; margin-top: 34px; padding-left: 100px; }
+.cd-line { align-self: flex-start; display: flex; align-items: center; gap: 16px; padding: 2px 6px; font-size: 30px; color: var(--body); opacity: 0; }
+.cd-line .mono { font-family: var(--mono); font-size: 27px; color: var(--blue); background: var(--blue-tint); border-radius: 8px; padding: 2px 12px; }
 .ab-glow { position: absolute; left: 50%; top: 90px; width: 1000px; height: 560px; margin-left: -500px; border-radius: 50%; background: radial-gradient(closest-side, rgba(0, 120, 212, .10), rgba(0, 120, 212, 0)); }
 .dock { position: absolute; border-radius: 34px; background: rgba(255, 255, 255, .62); border: 1.5px solid rgba(255, 255, 255, .95); box-shadow: 0 0 0 1px rgba(27, 27, 31, .06), 0 22px 50px rgba(27, 27, 31, .14); }
 .app { position: absolute; display: grid; place-items: center; background: linear-gradient(160deg, #f7f8fa, #dde2e9); box-shadow: inset 0 0 0 1px rgba(27, 27, 31, .06), 0 6px 14px rgba(27, 27, 31, .10); }
