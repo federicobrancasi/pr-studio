@@ -10,6 +10,7 @@ export const REPO_HELP = `  prs changelog [--run id | file]    the videos for th
   prs digest new [--run id | --file report.md]   one video for the top 5 of a #changelog report (guides/digest.md)
   prs digest check | stills [--at t,..] | render | scenes [slug]   check, look at, render it; the drawn scenes
   prs demo <id> [--slug s]           record demos/<id>.mjs in VS Code (PRS_VSCODE: the build; signed in on macOS)
+  prs demo check                     whether VS Code starts here (demos work), in about 20 s
   prs prompt <PR>                    the prompt for a run nobody watches (a GitHub Actions job) to make that PR's video
   prs triage <PRs...> | --file f     which PRs get a video, which are faster to read (--cap n for a changelog)
   prs summary [triage.json]          the closing Slack message for a triage run
@@ -27,8 +28,12 @@ export async function repoCommand(cmd, args) {
 			return;
 		}
 		case 'demo': {
-			const { demo } = await import('./lib/demo.mjs');
+			const { demo, demoCheck } = await import('./lib/demo.mjs');
 			const { digestSlug } = await import('./lib/digest.mjs');
+			if (args._[0] === 'check') {
+				process.exitCode = await demoCheck() ? 0 : 1;
+				return;
+			}
 			if (!args._[0]) {
 				throw new Error('prs demo <id> [--slug changelog-<date>]: records videos/<slug>/demos/<id>.mjs');
 			}

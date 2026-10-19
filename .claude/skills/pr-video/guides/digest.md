@@ -24,8 +24,9 @@ the words and choose what to show.
    - outro: `That's today's changelog. The full list is in the changelog channel.`
    - then `prs voice <slug>` (the local voice: about a minute).
 4. **The visual of each chapter** (`digest.json` → `visual`), see below: **try a demo first** for every change a
-   signed-out user can see, a scene otherwise. Record demos with `prs demo <id> --slug <slug>`, and look at each
-   demo's `contact.png`.
+   signed-out user can see, a scene otherwise. First run `prs demo check` (about 20 s): if VS Code doesn't start
+   here, draw every chapter as a scene and write its error in `notes.md`. Record demos with
+   `prs demo <id> --slug <slug>`, and look at each demo's `contact.png`.
 5. **The strip, the links and the timing** in `digest.json`, then `prs digest check <slug>` until it passes.
 6. `prs digest stills <slug>`: look at its contact sheet **once**, fix what is wrong, then `prs digest render <slug>`.
    It delivers the mp4, its captions, `contact.png` and `<slug>.json` to the delivery folder (`PRS_DELIVER`).
@@ -209,7 +210,8 @@ The daily job in GitHub Actions: nobody reads your messages until it's over, and
 - **Don't ask questions.** When something is unclear, decide, and write the decision in one line in
   `videos/<slug>/notes.md`.
 - **Time:** aim for 40 minutes, stop at 60. When the same step fails twice the same way (a demo, a check, the
-  render), write what failed and the error in `notes.md`, and take the fallback: a scene instead of a demo.
+  render), write what failed and the error in `notes.md`, and take the fallback: a scene instead of a demo. When
+  VS Code doesn't start at all (`prs demo check`, or "VS Code did not start"), don't retry: scenes for every chapter.
 - **Look once:** open each demo's contact sheet and the stills' contact sheet, not every frame.
 - **Leave pr-studio as it is:** no commits, and no changes to the CLI, the player, the scenes or the guides. If
   something in them is broken, say so in `notes.md`.

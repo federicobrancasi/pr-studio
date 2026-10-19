@@ -77,6 +77,43 @@ async function ensureDisplay() {
 }
 
 /** Opens VS Code on a workspace in a throwaway profile; close() deletes it (also on Ctrl+C and errors). */
+/** Linux: kills every process started with this profile (a failed launch can leave VS Code's helpers running). */
+function killProfileProcesses(marker) {
+	if (process.platform !== 'linux') {
+		return;
+	}
+	for (const pid of fs.readdirSync('/proc').filter(n => /^\d+$/.test(n) && Number(n) !== process.pid)) {
+		try {
+			if (fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes(marker)) {
+				process.kill(Number(pid), 'SIGKILL');
+			}
+		} catch { }
+	}
+}
+
+/** How long VS Code may take to open its window. */
+const LAUNCH_TIMEOUT = 60_000;
+
+/**
+ * When VS Code exits during launch, Playwright rejects the launch, and also leaves a second promise rejected with
+ * nobody listening: Node would exit on it before the launch error is reported. Ignore that one; anything else still
+ * ends the process as usual.
+ */
+let launchNoiseIgnored = false;
+function ignoreLaunchNoise() {
+	if (launchNoiseIgnored) {
+		return;
+	}
+	launchNoiseIgnored = true;
+	process.on('unhandledRejection', reason => {
+		if (!/^(Process failed to launch!|Unable to open X display)/.test(String(reason?.message ?? reason))) {
+			process.nextTick(() => {
+				throw reason;
+			});
+		}
+	});
+}
+
 export async function openVSCode({ files = {}, settings = {}, signedIn = process.platform === 'darwin', log = console.log } = {}) {
 	const exe = vscodePath();
 	const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'prs-demo-'));
@@ -85,6 +122,7 @@ export async function openVSCode({ files = {}, settings = {}, signedIn = process
 		try {
 			app?.process()?.kill();
 		} catch { }
+		killProfileProcesses(tmp);
 		xserver?.stop();
 		fs.rmSync(tmp, { recursive: true, force: true });
 	};
@@ -142,14 +180,20 @@ export async function openVSCode({ files = {}, settings = {}, signedIn = process
 			}
 			args.unshift('--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage', '--password-store=basic', '--force-device-scale-factor=2');
 		}
-		app = await _electron.launch({ executablePath: exe, args, env, timeout: 90_000 });
-		const page = await app.firstWindow();
+		ignoreLaunchNoise();
+		try {
+			app = await _electron.launch({ executablePath: exe, args, env, timeout: LAUNCH_TIMEOUT });
+		} catch (error) {
+			// Playwright's call log holds what VS Code printed: keep it whole, say its end.
+			throw new LaunchError(error, exe);
+		}
+		const page = await app.firstWindow({ timeout: LAUNCH_TIMEOUT });
 		await app.evaluate(({ BrowserWindow }, s) => {
 			const w = BrowserWindow.getAllWindows()[0];
 			w.setPosition(40, 40);
 			w.setContentSize(s.width, s.height);
 		}, SIZE);
-		await page.waitForSelector('.monaco-workbench', { timeout: 90_000 });
+		await page.waitForSelector('.monaco-workbench', { timeout: LAUNCH_TIMEOUT });
 		log(`VS Code up (${signedIn ? 'signed in: a copy of the local profile' : 'signed out'})`);
 		return {
 			app, page, workspace,
@@ -165,6 +209,16 @@ export async function openVSCode({ files = {}, settings = {}, signedIn = process
 		process.off('SIGINT', onSignal);
 		process.off('SIGTERM', onSignal);
 		throw error;
+	}
+}
+
+/** VS Code did not start: the whole launch log is in `log`, its last lines in the message. */
+export class LaunchError extends Error {
+	constructor(error, exe) {
+		const log = String(error?.message ?? error);
+		const tail = log.split('\n').map(l => l.trimEnd()).filter(Boolean).slice(-14).join('\n  ');
+		super(`VS Code did not start (${exe}): ${log.split('\n')[0]}\n  ${tail}`);
+		this.log = log;
 	}
 }
 
@@ -423,6 +477,42 @@ async function demoContact(dir, info, out) {
 	}
 }
 
+/**
+ * prs demo check: starts VS Code once and says whether demos can be recorded here (about 20 s). Writes
+ * videos/.demo-check.json (and .png: the window, or .log: why it did not start).
+ */
+export async function demoCheck() {
+	const dir = videoDir('');
+	fs.mkdirSync(dir, { recursive: true });
+	const base = path.join(dir, '.demo-check');
+	for (const ext of ['.json', '.png', '.log']) {
+		fs.rmSync(base + ext, { force: true });
+	}
+	const t0 = Date.now();
+	let build = null;
+	try {
+		build = buildInfo();
+		const vscode = await openVSCode({ files: { 'README.md': '# Check\n' }, log: () => { } });
+		try {
+			if (process.platform !== 'darwin') {
+				await skipOnboarding(vscode.page);
+			}
+			await vscode.page.screenshot({ path: base + '.png' });
+		} finally {
+			await vscode.close();
+		}
+		const seconds = +((Date.now() - t0) / 1000).toFixed(1);
+		writeJson(base + '.json', { ok: true, build, seconds, at: new Date().toISOString() });
+		console.log(`demos work here: ${build.name ?? 'VS Code'} ${build.version ?? ''} started in ${seconds} s (${base}.png)`);
+		return true;
+	} catch (error) {
+		fs.writeFileSync(base + '.log', error.log ?? String(error.stack ?? error));
+		writeJson(base + '.json', { ok: false, build, error: error.message.split('\n')[0], at: new Date().toISOString() });
+		console.log(`demos don't work here: ${error.message}\n(the whole log: ${base}.log) Draw every chapter as a scene.`);
+		return false;
+	}
+}
+
 export async function demo(slug, id, { signedIn = process.platform === 'darwin' } = {}) {
 	const script = path.join(videoDir(slug), 'demos', `${id}.mjs`);
 	if (!fs.existsSync(script)) {
@@ -433,13 +523,25 @@ export async function demo(slug, id, { signedIn = process.platform === 'darwin' 
 		throw new Error(`${script} must export default async function demo(ctx)`);
 	}
 	const out = path.join(buildDir(slug), 'demos', id);
+	const failures = path.join(buildDir(slug), 'demos', 'launch-failures.log');
+	const failed = fs.existsSync(failures) ? fs.readFileSync(failures, 'utf8').split('\n=====\n').filter(Boolean).length : 0;
+	if (failed >= 2) {
+		throw new Error(`VS Code failed to start ${failed} times in this project (${failures}): demos don't work here, draw this chapter as a scene`);
+	}
 	fs.rmSync(out, { recursive: true, force: true });
 	const raw = path.join(out, 'raw');
 	fs.mkdirSync(raw, { recursive: true });
 	const t0 = Date.now();
 	const log = (...a) => console.log(`[demo ${id} ${((Date.now() - t0) / 1000).toFixed(0)}s]`, ...a);
 	const build = buildInfo();
-	const vscode = await openVSCode({ files: mod.files ?? { 'README.md': '# My project\n' }, settings: mod.settings ?? {}, signedIn, log });
+	let vscode;
+	try {
+		vscode = await openVSCode({ files: mod.files ?? { 'README.md': '# My project\n' }, settings: mod.settings ?? {}, signedIn, log });
+	} catch (error) {
+		fs.writeFileSync(path.join(out, 'failure.log'), error.log ?? String(error.stack ?? error));
+		fs.appendFileSync(failures, `${new Date().toISOString()} demo ${id}\n${error.log ?? error.message}\n=====\n`);
+		throw error;
+	}
 	const { page, app } = vscode;
 	const ctx = helpers(page, app);
 	ctx.scheme = build.quality === 'insider' ? 'vscode-insiders' : 'vscode';
