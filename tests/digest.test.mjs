@@ -1,7 +1,7 @@
 // The changelog digest: its times (phrases of the narration, demo marks, steps) and the strip's height.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fitZoom, iconsOf, inProof, loadSceneDocs, planFocus, proofCorpus, resolveTime, resolveTimes, steadyFrom, stripHeight } from '../cli/lib/digest.mjs';
+import { fitZoom, focusShows, iconsOf, inProof, loadSceneDocs, planFocus, proofCorpus, resolveTime, resolveTimes, steadyFrom, stripHeight } from '../cli/lib/digest.mjs';
 
 // A chapter that starts 10 s into the video: "Five. VS Code links can now add a plugin marketplace."
 const words = ['Five.', 'VS', 'Code', 'links', 'can', 'now', 'add', 'a', 'plugin', 'marketplace.']
@@ -142,3 +142,13 @@ test('a drawn setting has VS Code\'s own title; another title must be proved fro
 		titleProofs({ id: 'chat.copilotCliCommand.enabled' }),
 	], [['Fusion'], [], []]);
 });
+
+test('a recording starts 1.2 s before its focus first shows the proof: how the demo got there is cut', () => {
+	const demo = { marks: { row: { visible: [[0.5, 1], [7.03, 11]], texts: ['Commonly Used', 'Enable image generation with GPT Image 2.5 Sunburst'] } } };
+	assert.deepStrictEqual([
+		focusShows(demo, { focus: 'row', proof: 'GPT Image 2.5 Sunburst' }),
+		focusShows(demo, { focus: 'row' }),
+		focusShows(demo, { focus: 'missing' }),
+	], [5.83, 0, 0]);
+});
+

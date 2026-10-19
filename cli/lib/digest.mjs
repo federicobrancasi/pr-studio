@@ -376,7 +376,8 @@ export function planFocus(id, spec, { start, end, targets, kit, demo, clip, reco
 			// The camera frames the focus as it is once steady, and the arrow waits for the camera to settle.
 			const m = recording.marks[name];
 			const box = trackBoxAt(m, steadyClip) ?? m.rect;
-			const z = Math.min(1.5, 0.5 * CLIP_W / box[2], 0.5 * CLIP_H / box[3]);
+			// As close as the whole focus still fits (85% of the view), at most 1.5x.
+			const z = Math.min(1.5, 0.85 * CLIP_W / box[2], 0.85 * CLIP_H / box[3]);
 			if (z >= 1.1) {
 				camera = [{ at: r3(Math.max(start + 0.2, a - 0.1)), dur: 0.9, z: r3(z), fx: r3(box[0] + box[2] / 2), fy: r3(box[1] + box[3] / 2) }];
 				from = Math.max(from, camera[0].at + camera[0].dur + 0.05);
@@ -390,6 +391,14 @@ export function planFocus(id, spec, { start, end, targets, kit, demo, clip, reco
 	}
 	out.focusProblem = `${id}: "${name}" is on screen (and steady) ${windows.map(([a, b]) => `${fmt(a)}-${fmt(Math.min(b, end))} s`).join(', ')} into the chapter, but its row "${row}" is in only at ${fmt(rowIn)} s: the arrow would last under 1 s. Show it longer (or later, clip.start/end), or bring the row in earlier`;
 	return out;
+}
+
+/** Where a demo's part shown starts by default: 1.2 s before its focus first shows (with the proof), or 0. */
+export function focusShows(demo, ch) {
+	const m = demo.marks?.[ch.focus];
+	const proofs = [].concat(ch.proof ?? []).map(proofText).filter(Boolean);
+	const i = (m?.visible ?? []).findIndex((_, k) => proofs.every(p => proofText(m.texts?.[k] ?? '').includes(p)));
+	return i < 0 ? 0 : Math.max(0, +(m.visible[i][0] - 1.2).toFixed(2));
 }
 
 /** The first moment (seconds of the recording) in [a, b] when a tracked mark has been still for 0.3 s, or null. */
@@ -448,7 +457,8 @@ export async function planDigest(slug) {
 				const demo = readJson(demoFile);
 				const clipSpec = ch.clip ?? {};
 				// The part of the recording shown: clip.start to clip.end (seconds, or a moment such as when a mark shows).
-				const cStart = clipSpec.start === undefined ? 0 : clipMoment(clipSpec.start, demo, `${where}.clip.start`);
+				// By default it starts 1.2 s before the focus first shows (with the proof): not on how the demo got there.
+				const cStart = clipSpec.start !== undefined ? clipMoment(clipSpec.start, demo, `${where}.clip.start`) : focusShows(demo, ch);
 				const cEnd = Math.min(clipSpec.end === undefined ? demo.duration : clipMoment(clipSpec.end, demo, `${where}.clip.end`), demo.count / CLIP_FPS);
 				if (cEnd - cStart < 1) {
 					throw new Error(`${beat.id}: the part of the recording shown is ${(cEnd - cStart).toFixed(1)} s (clip.start/end): at least 1 s`);

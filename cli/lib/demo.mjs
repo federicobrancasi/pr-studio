@@ -7,7 +7,8 @@
 //   export const settings = { 'editor.minimap.enabled': false };  // user settings (optional)
 //   export async function setup({ page, run, ... }) { ... }   // before recording starts (optional)
 //   export default async function demo({ page, run, mark, step, moveTo, click, type, press, sleep, openUrl }) { ... }
-// mark(name, locator, { text }) logs that element's box (or the box of a text inside it) and the times it is shown:
+// mark(name, locator, { text }) logs that element's box and the times it is shown (with { text }: only while that text
+// shows in it):
 // marks are followed for the whole recording, so give each one a locator that matches only its UI (filter by its
 // text); step(label) logs a moment worth a still.
 //
@@ -519,9 +520,11 @@ function measure(elements, text) {
 		if (el.checkVisibility && !el.checkVisibility({ opacityProperty: true, visibilityProperty: true, contentVisibilityAuto: true })) {
 			continue;
 		}
-		let r = el.getBoundingClientRect();
+		const box = el.getBoundingClientRect();
+		let r = box;
 		if (text) {
-			// The words themselves (a sentence of a paragraph): a range over the text nodes that hold them.
+			// The words themselves (a sentence of a paragraph): a range over the text nodes that hold them. The mark counts
+			// only while they show (and aren't covered); its box stays the element's: the ring goes around the whole UI.
 			const nodes = [];
 			const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
 			let all = '';
@@ -545,9 +548,9 @@ function measure(elements, text) {
 		}
 		const inWindow = r.width > 2 && r.height > 2 && r.right > 0 && r.bottom > 0 && r.left < innerWidth && r.top < innerHeight;
 		if (inWindow && onTop(el, r)) {
-			// What it says (or the marked words): a demo proves it shows the PR's UI with it.
-			const said = text ?? (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 4000);
-			return { x: r.x, y: r.y, width: r.width, height: r.height, text: said };
+			// What it says: a demo proves it shows the PR's UI with it.
+			const said = (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 4000);
+			return { x: box.x, y: box.y, width: box.width, height: box.height, text: said };
 		}
 	}
 	return null;

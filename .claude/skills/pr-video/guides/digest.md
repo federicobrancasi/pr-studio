@@ -110,7 +110,7 @@ A dialog opened by a link (cancelled: never change anything):
 ```js
 export default async function demo({ page, openUrl, click, mark, step, sleep, scheme }) {
 	const dialog = page.locator('.monaco-dialog-box').filter({ hasText: 'Install Plugin' });
-	mark('warning', dialog, { text: 'Plugins can run code on your machine.' });   // the box of a sentence inside it
+	mark('warning', dialog, { text: 'Plugins can run code on your machine.' });   // the dialog, while it shows this
 	await openUrl(`${scheme}://chat-plugin/install?source=owner/repo&plugin=name`);
 	await dialog.waitFor({ state: 'visible' });
 	step('dialog');
@@ -124,8 +124,11 @@ export default async function demo({ page, openUrl, click, mark, step, sleep, sc
   `export const files = { ... }` and `export const settings = { ... }` set up the workspace and user settings;
   `export async function setup(ctx)` runs before the recording starts.
 - `mark(name, locator, { text })` follows that UI through the recording. It counts as on screen only when it really
-  is: in the window, not transparent, and not covered by anything. Give it a locator that matches only the UI that
-  shows the change (filter by text only that UI shows).
+  is: in the window, not transparent, not covered by anything (and with `{ text }`, only while that text shows in it).
+  The ring goes around the whole element: mark the UI that shows the change (the setting's row, the dialog, the
+  button), with a locator that matches only it (filter by text only it shows), not a phrase inside it.
+- The recording starts 1.2 s before the focus first shows (`clip.start` to start elsewhere): how the demo got there
+  (the Command Palette, typing) is cut.
 - Hold the change on screen 2-3 s, still. A demo of 8-15 s is plenty.
 - Never change anything outside the throwaway profile: cancel install and sign-in dialogs.
 - **Check its contact sheet**: is the change on screen, is the focus mark's box on the right UI, is the text readable?
