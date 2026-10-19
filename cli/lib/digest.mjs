@@ -567,6 +567,7 @@ export async function checkDigest(slug) {
 		problems.push(`the narration has ${words} words: cut it to about 150 (the video should run under a minute)`);
 	}
 	const kit = await loadSceneDocs();
+	const icons = new Set([...(await sceneKit()).ICON_NAMES, 'github']);
 	const corpora = new Map();
 	for (const [i, id] of ids.entries()) {
 		const ch = digest.chapters?.[id];
@@ -582,6 +583,11 @@ export async function checkDigest(slug) {
 			problems.push(`${id}: can't read #${pick.number} to check what the chapter shows (${error.message.split('\n')[0]})`);
 		}
 		const isPr = text => !corpus || inProof(corpus, text);
+		for (const name of new Set(iconsOf({ before: ch.before, now: ch.now, visual: ch.visual }))) {
+			if (!icons.has(name)) {
+				problems.push(`${id}: there is no icon "${name}" (prs digest scenes lists the icons)`);
+			}
+		}
 		const where = `#${pick.number} (its diff, the files it changes, its title or description)`;
 		if (ch.setting?.name && !isPr(ch.setting.name)) {
 			problems.push(`${id}: the setting "${ch.setting.name}" is not in ${where}`);
@@ -865,14 +871,35 @@ export async function renderDigest(slug, { workers = 3 } = {}) {
 
 /** The scene kit, for Node: names, docs, params, windows and proofs (bundled: their icons are SVG files). */
 export async function loadSceneDocs() {
-	const out = path.join(ROOT, 'videos', '.scenes.node.mjs');
-	fs.mkdirSync(path.dirname(out), { recursive: true });
-	await esbuild.build({
-		entryPoints: [path.join(ROOT, 'digest', 'scenes', 'index.js')], bundle: true, platform: 'node', format: 'esm', outfile: out,
-		loader: { '.svg': 'text', '.css': 'empty' }, logLevel: 'silent', absWorkingDir: ROOT,
-	});
-	const { SCENES } = await import(`${pathToFileURL(out).href}?v=${Date.now()}`);
-	return SCENES;
+	return (await sceneKit()).SCENES;
+}
+
+let kitModule = null;
+/** The scene kit's module for Node (once per process): SCENES, and ICON_NAMES (what an "icon" can be). */
+async function sceneKit() {
+	if (!kitModule) {
+		const out = path.join(ROOT, 'videos', '.scenes.node.mjs');
+		fs.mkdirSync(path.dirname(out), { recursive: true });
+		await esbuild.build({
+			entryPoints: [path.join(ROOT, 'digest', 'scenes', 'index.js')], bundle: true, platform: 'node', format: 'esm', outfile: out,
+			loader: { '.svg': 'text', '.css': 'empty' }, logLevel: 'silent', absWorkingDir: ROOT,
+		});
+		kitModule = await import(`${pathToFileURL(out).href}?v=${Date.now()}`);
+	}
+	return kitModule;
+}
+
+/** Every icon name a chapter uses: rows, heads and scene params ("icon", "tabIcon", and list-actions' "others"). */
+export function iconsOf(value) {
+	if (Array.isArray(value)) {
+		return value.flatMap(iconsOf);
+	}
+	if (!value || typeof value !== 'object') {
+		return [];
+	}
+	return Object.entries(value).flatMap(([k, v]) => (k === 'icon' || k === 'tabIcon') && typeof v === 'string' ? [v]
+		: k === 'others' && Array.isArray(v) ? v.filter(x => typeof x === 'string')
+			: iconsOf(v));
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -936,6 +963,7 @@ export async function digestCommand(args) {
 				}
 				console.log(`    targets: ${s.targets.join(', ')}`);
 			}
+			console.log(`icons: ${(await sceneKit()).ICON_NAMES.join(', ')}, github`);
 			return 0;
 		}
 		default:

@@ -1,7 +1,7 @@
 // The changelog digest: its times (phrases of the narration, demo marks, steps) and the strip's height.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fitZoom, inProof, linkProblems, loadSceneDocs, proofCorpus, resolveTime, resolveTimes, stripHeight } from '../cli/lib/digest.mjs';
+import { fitZoom, iconsOf, inProof, linkProblems, loadSceneDocs, proofCorpus, resolveTime, resolveTimes, stripHeight } from '../cli/lib/digest.mjs';
 
 // A chapter that starts 10 s into the video: "Five. VS Code links can now add a plugin marketplace."
 const words = ['Five.', 'VS', 'Code', 'links', 'can', 'now', 'add', 'a', 'plugin', 'marketplace.']
@@ -102,3 +102,12 @@ test('a drawn UI must be the PR\'s, and an arrow must point at a part that is dr
 		tooEarly: 1,
 	});
 });
+
+test('every icon a chapter uses is found: in rows, heads and scene params', () => {
+	assert.deepStrictEqual(iconsOf({
+		before: { icon: 'history', rows: [{ id: 'a', icon: 'pin', text: 'Pin' }] },
+		now: { rows: [{ id: 'b', style: 'chip', icon: 'github', text: 'Sign in' }, { id: 'c', text: 'No icon' }] },
+		visual: { scene: { name: 'list-actions', params: { before: { icon: 'pin' }, after: { icon: 'pulse' }, others: ['check'], rows: [{ label: 'icon' }] } } },
+	}), ['history', 'pin', 'github', 'pin', 'pulse', 'check']);
+});
+
