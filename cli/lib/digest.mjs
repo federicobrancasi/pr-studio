@@ -18,6 +18,12 @@ import { ROOT, buildDir, findFfmpeg, isOffline, loadConfig, readJson, videoDir, 
 import { launch } from './browser.mjs';
 
 const FPS = 30, CLIP_FPS = 30;
+const CLIP_W = 1280, CLIP_H = 720;
+
+/** The closest zoom (1 to 2) at which a box of the recording ([x, y, w, h]) still fits the view, with a margin. */
+export function fitZoom([, , w, h]) {
+	return Math.round(100 * Math.max(1, Math.min(2, 0.85 * CLIP_W / w, 0.85 * CLIP_H / h))) / 100;
+}
 export const VIEW_H = 675;
 const STRIP = { eyebrow: [28, 14], head: [52, 12], row: [66, 10], rowTall: [84, 10], arrow: [40, 10], setting: [84, 0], settingState: [128, 0], settingGap: 16 };
 export const TIMING = {
@@ -383,15 +389,17 @@ export function planDigest(slug) {
 			const { clip, visual: _v, pick: _p, ...rest } = ch;
 			const spec = resolveTimes(rest, full, where);
 			spec.camera = (spec.camera ?? []).map((c, i) => {
-				let fx = c.fx, fy = c.fy;
+				let fx = c.fx, fy = c.fy, fit;
 				if (c.focus) {
 					const r = targets[c.focus]?.rect;
 					if (!r) {
 						throw new Error(`${beat.id}: camera[${i}].focus "${c.focus}" is not a mark of the demo`);
 					}
 					[fx, fy] = [r[0] + r[2] / 2, r[1] + r[3] / 2];
+					fit = fitZoom(r);
 				}
-				return { at: c.at, dur: c.dur ?? 1, z: c.zoom ?? c.z ?? 1, fx: fx ?? 640, fy: fy ?? 360 };
+				// Focused on a mark without a zoom: as close as it still fits.
+				return { at: c.at, dur: c.dur ?? 1, z: c.zoom ?? c.z ?? fit ?? 1, fx: fx ?? 640, fy: fy ?? 360 };
 			});
 			if (visual.scene) {
 				spec.scene = { name: visual.scene.name, params: resolveTimes(visual.scene.params ?? {}, full, `${where}.visual.scene.params`) };
@@ -502,6 +510,13 @@ export async function checkDigest(slug) {
 						problems.push(`${id}: "${m}" is not a mark of demo ${v.demo} (marks: ${Object.keys(demo.marks).join(', ') || 'none'})`);
 					} else if (!demo.marks[m].visible.length) {
 						problems.push(`${id}: mark "${m}" is never on screen in demo ${v.demo}: look at its contact sheet`);
+					}
+				}
+				for (const c of ch.camera ?? []) {
+					const r = c.focus && demo.marks[c.focus]?.rect;
+					const z = c.zoom ?? c.z;
+					if (r && z && z > fitZoom(r) + 0.05) {
+						problems.push(`${id}: a zoom of ${z} crops "${c.focus}" (it fits up to ${fitZoom(r)}): leave "zoom" out to fit it`);
 					}
 				}
 			}

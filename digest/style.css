@@ -153,7 +153,8 @@
 .dl-head { display: flex; align-items: flex-start; gap: 16px; }
 .dl-title { font-size: 25px; font-weight: 600; color: #e7e7e7; line-height: 1.3; }
 .dl-detail { margin: 16px 0 0 46px; font-size: 22px; color: #bbbbbb; line-height: 1.45; }
-.dl-mark { background-image: linear-gradient(rgba(216, 59, 1, .38), rgba(216, 59, 1, .38)); background-repeat: no-repeat; background-size: 0% 100%; border-radius: 3px; color: #f2f2f2; }
+/* Its own lines (inline-block): the arrow's ring hugs the sentence, not the paragraph around it. */
+.dl-mark { display: inline-block; background-image: linear-gradient(rgba(216, 59, 1, .38), rgba(216, 59, 1, .38)); background-repeat: no-repeat; background-size: 0% 100%; border-radius: 3px; color: #f2f2f2; }
 .dl-buttons { display: flex; justify-content: flex-end; gap: 12px; margin-top: 26px; }
 .dl-btn { height: 42px; padding: 0 18px; border-radius: 5px; display: flex; align-items: center; font-size: 22px; background: #3a3d41; color: #e7e7e7; white-space: nowrap; }
 .dl-btn.primary { background: #0e639c; color: #fff; }

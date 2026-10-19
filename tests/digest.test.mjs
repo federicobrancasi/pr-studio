@@ -1,7 +1,7 @@
 // The changelog digest: its times (phrases of the narration, demo marks, steps) and the strip's height.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveTime, resolveTimes, stripHeight } from '../cli/lib/digest.mjs';
+import { fitZoom, resolveTime, resolveTimes, stripHeight } from '../cli/lib/digest.mjs';
 
 // A chapter that starts 10 s into the video: "Five. VS Code links can now add a plugin marketplace."
 const words = ['Five.', 'VS', 'Code', 'links', 'can', 'now', 'add', 'a', 'plugin', 'marketplace.']
@@ -52,4 +52,9 @@ test('the strip height counts every item and its gap, and a strip of E\'s last c
 	};
 	const withSetting = { now: { rows: [{ text: 'On by default' }] }, setting: { name: 'a.b', state: 'On by default' } };
 	assert.deepStrictEqual([stripHeight(c5), stripHeight(withSetting)], [654, 64 + 76 + 16 + 128]);
+});
+
+test('a camera focused on a mark zooms as close as the mark still fits, between 1 and 2', () => {
+	// A settings row (wide), a button (small), and a whole window (no zoom).
+	assert.deepStrictEqual([fitZoom([353, 210, 774, 97.8]), fitZoom([742, 431, 114, 26]), fitZoom([0, 0, 1280, 720])], [1.41, 2, 1]);
 });

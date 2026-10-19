@@ -46,14 +46,15 @@ export function fillIcons(node) {
 	}
 }
 
-/** Where a node sits on the page (layout offsets, transforms ignored): `view` is where the scene's host is drawn. */
+/**
+ * Where a node sits on the page: `view` is where the scene's host is drawn. Measured as laid out when the scene is
+ * built (before any frame animates it), so centering transforms count, and a sentence that wraps gets the box of its
+ * lines.
+ */
 export function sceneRect(node, host, view) {
-	let x = 0, y = 0;
-	for (let n = node; n && n !== host; n = n.offsetParent) {
-		x += n.offsetLeft;
-		y += n.offsetTop;
-	}
-	return { x: view.x + x, y: view.y + y, w: node.offsetWidth, h: node.offsetHeight };
+	const a = node.getBoundingClientRect(), b = host.getBoundingClientRect();
+	const k = host.offsetWidth ? b.width / host.offsetWidth : 1;
+	return { x: view.x + (a.left - b.left) / k, y: view.y + (a.top - b.top) / k, w: a.width / k, h: a.height / k };
 }
 
 /**

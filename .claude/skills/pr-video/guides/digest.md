@@ -23,8 +23,9 @@ the words and choose what to show.
      guesses, nothing the diff doesn't support.
    - outro: `That's today's changelog. The full list is in the changelog channel.`
    - then `prs voice <slug>` (the local voice: about a minute).
-4. **The visual of each chapter** (`digest.json` → `visual`), see below: a demo when the change can be recorded,
-   otherwise a scene. Record demos with `prs demo <id> --slug <slug>`, and look at each demo's `contact.png`.
+4. **The visual of each chapter** (`digest.json` → `visual`), see below: **try a demo first** for every change a
+   signed-out user can see, a scene otherwise. Record demos with `prs demo <id> --slug <slug>`, and look at each
+   demo's `contact.png`.
 5. **The strip, the links and the timing** in `digest.json`, then `prs digest check <slug>` until it passes.
 6. `prs digest stills <slug>`: look at its contact sheet **once**, fix what is wrong, then `prs digest render <slug>`.
    It delivers the mp4, its captions, `contact.png` and `<slug>.json` to the delivery folder (`PRS_DELIVER`).
@@ -37,6 +38,11 @@ with **no network**: no Copilot chat or agent sessions, no Agents window, no mar
 What works: the editor, settings, the Command Palette, keybindings, views, the Welcome page, dialogs, notifications,
 `vscode-insiders://` links opened in the window, terminals. A change is demoable when a signed-out user in a fresh
 window can see it.
+
+**Record every change you can.** A product demo is what this video is for: for each chapter, ask whether a signed-out
+user could see the change in a fresh window, and if so, write its demo and record it before you settle for a scene.
+Settings changes almost always can (a new setting, a new default, a new description: the Settings editor, below),
+and so can commands, keybindings, dialogs and links. Decide from the recording, not from guessing.
 
 **A scene** draws the UI the change is about, from the PR's real strings: when the change needs a sign-in, the
 network, an extension, another OS or the Stable build, or when the demo doesn't show it. `prs digest scenes` lists
@@ -54,6 +60,10 @@ them with their params and targets:
 | `notification` | a notification toast and its actions |
 
 Never fake a recording: a scene is a drawing, and that's fine. Never draw what the PR doesn't show either.
+
+**A change with no UI of its own** (a default behind the scenes, telemetry, an internal rename): say plainly what it
+changes for users, and show the closest real UI it applies to (its setting, the view it runs in), never UI the PR
+doesn't add. If nothing a user sees changes, say that in the narration ("Nothing changes on screen: ...").
 
 ## Demo scripts
 
@@ -86,6 +96,27 @@ export default async function demo({ page, run, openUrl, click, moveTo, type, pr
 - Never change anything outside the throwaway profile: cancel install and sign-in dialogs.
 - **Check its contact sheet**: is the change on screen, and is each mark's box on the right UI? If the demo fails
   twice, or doesn't show the change, use a scene and write why in `notes.md`.
+
+A setting in the Settings editor (it opens over the window: press Escape before clicking anything behind it):
+
+```js
+export default async function demo({ page, run, type, mark, step, sleep }) {
+	await run('Preferences: Open Settings (UI)');
+	const editor = page.locator('.settings-editor');
+	await editor.waitFor({ state: 'visible' });
+	await sleep(600);
+	await type('chat.welcomePage.signIn.enabled', { delay: 25 });   // the search box has the focus
+	const row = editor.locator('.setting-item-contents').filter({ hasText: 'Welcome Page' }).first();
+	mark('row', row);
+	mark('value', row.locator('.setting-value-checkbox, .monaco-custom-toggle').first());
+	mark('description', row.locator('.setting-item-description').first());
+	await row.waitFor({ state: 'visible' });
+	step('setting');
+	await sleep(2200);
+}
+```
+
+Then zoom on it in `digest.json`: `"camera": [{ "at": { "mark": "row" }, "focus": "row" }]` (as close as it fits).
 
 ## digest.json
 
@@ -160,8 +191,8 @@ A chapter with a demo (Oct 19, #342430): no verified before, so "before" lists t
 - **visual**: `{ "demo": "c5" }` or `{ "scene": { "name": "...", "params": { ... } } }` (times in params too).
 - **clip** (demos): `anchors` pin moments of the recording to the narration (the recording plays faster or slower
   between them), `end` stops it (it holds its last frame), `after` is the speed after the last anchor.
-- **camera** (demos): zoom moves `{ at, dur, zoom, fx, fy }` (fx, fy in the 1280×720 window) or `{ at, zoom, focus:
-  "mark" }`. Zoom 1.3-1.9 on the UI that changed; not on a scene.
+- **camera** (demos): zoom moves `{ at, focus: "mark" }` (centered on that mark, as close as it fits; `zoom` to set
+  it) or `{ at, dur, zoom, fx, fy }` (fx, fy in the 1280×720 window). Zoom on the UI that changed; not on a scene.
 - **recap**: the outro's line, `{ before, now, mono }`: `before: null` shows "New".
 
 ## Before you render
