@@ -132,3 +132,13 @@ test('every icon a chapter uses is found: in rows, heads and scene params', () =
 	}), ['history', 'pin', 'github', 'pin', 'pulse', 'check']);
 });
 
+
+test('a drawn setting has VS Code\'s own title; another title must be proved from the PR', async () => {
+	const kit = await loadSceneDocs();
+	const titleProofs = params => kit.setting.proofs(params).filter(x => x.param === 'title').map(x => x.text);
+	assert.deepStrictEqual([
+		titleProofs({ id: 'chat.copilot.ensemble.enabled', title: 'Fusion' }),
+		titleProofs({ id: 'chat.copilot.imageGeneration.enabled', title: 'Chat › Copilot › Image Generation: Enabled' }),
+		titleProofs({ id: 'chat.copilotCliCommand.enabled' }),
+	], [['Fusion'], [], []]);
+});

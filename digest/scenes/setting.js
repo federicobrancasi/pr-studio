@@ -2,12 +2,18 @@
 // change ("now on by default", "a new setting").
 import { esc, iconSlot, fillIcons, sceneRect, vscodeWindow, ramp, standard, clamp } from './chrome.js';
 
+/** The title VS Code's Settings editor shows for a setting ID: chat.copilot.imageGeneration.enabled → "Chat › Copilot › Image Generation: Enabled". */
+export function settingTitle(id) {
+	const parts = String(id ?? '').split('.').map(s => s.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, c => c.toUpperCase()));
+	return parts.length > 1 ? `${parts.slice(0, -1).join(' › ')}: ${parts.at(-1)}` : parts[0] ?? '';
+}
+
 export default {
 	name: 'setting',
 	doc: 'The Settings editor with one setting whose default (or value) changes, or a new setting.',
 	params: {
 		id: 'the setting ID, e.g. "chat.welcomePage.signIn.enabled"',
-		title: 'its title as in the Settings editor, e.g. "Chat › Welcome Page › Sign In: Enabled" (optional: derived from the ID)',
+		title: 'leave it out: VS Code\'s own title, from the ID ("Chat › Welcome Page › Sign In: Enabled"). Another title must be the PR\'s',
 		description: 'its description (quote the PR exactly)',
 		kind: '"checkbox" (default) or "text"',
 		before: 'the value before: true/false for a checkbox, a string for text (optional for a new setting)',
@@ -19,11 +25,15 @@ export default {
 	windows(p, { start, end }) {
 		return { row: [start, end], value: [start, end], description: [start, end] };
 	},
-	/** The setting's ID and, when shown, its description. */
-	proofs: p => [{ param: 'id', text: p.id }, ...(p.description ? [{ param: 'description', text: p.description }] : [])],
+	/** The setting's ID, its description, and a title other than VS Code's own (derived from the ID). */
+	proofs: p => [
+		{ param: 'id', text: p.id },
+		...(p.description ? [{ param: 'description', text: p.description }] : []),
+		...(p.title && p.title !== settingTitle(p.id) ? [{ param: 'title', text: p.title }] : []),
+	],
 	build(host, p, ctx) {
 		const { page } = vscodeWindow(host, { tab: 'Settings', tabIcon: 'settings' });
-		const title = p.title ?? String(p.id ?? '').split('.').map(s => s.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, c => c.toUpperCase())).join(' › ');
+		const title = p.title ?? settingTitle(p.id);
 		const value = p.kind === 'text'
 			? `<span class="st-text"><span class="old">${esc(p.before ?? '')}</span><span class="new">${esc(p.after ?? '')}</span></span>`
 			: '<span class="st-check"><i></i></span>';
