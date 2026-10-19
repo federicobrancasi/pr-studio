@@ -55,15 +55,15 @@ export function buildInfo(exe = vscodePath()) {
 }
 
 /** An X server for Linux runs without a display (CI): Xvfb on a free display number. */
-async function ensureDisplay() {
-	if (process.platform !== 'linux' || process.env.DISPLAY) {
+async function ensureDisplay(env = process.env) {
+	if (process.platform !== 'linux' || env.DISPLAY) {
 		return null;
 	}
 	for (let n = 90; n < 110; n++) {
 		if (fs.existsSync(`/tmp/.X11-unix/X${n}`) || fs.existsSync(`/tmp/.X${n}-lock`)) {
 			continue;
 		}
-		const xvfb = spawn('Xvfb', [`:${n}`, '-screen', '0', '2600x1500x24', '-nolisten', 'tcp'], { stdio: 'ignore' });
+		const xvfb = spawn('Xvfb', [`:${n}`, '-screen', '0', '2600x1500x24', '-nolisten', 'tcp'], { stdio: 'ignore', env });
 		for (let i = 0; i < 50 && !fs.existsSync(`/tmp/.X11-unix/X${n}`); i++) {
 			await sleep(100);
 		}
@@ -91,6 +91,59 @@ function killProfileProcesses(marker) {
 	}
 }
 
+/**
+ * Linux: what VS Code needs that a sandbox (gh-aw's agent firewall) changes. Its own runtime directory (it puts its
+ * sockets there, and shows a blocking dialog when the inherited one is not writable), fonts it can find (the
+ * sandbox's fontconfig finds no config), and the system's libraries rather than the copies of headless Chrome's that
+ * the sandbox puts first (VS Code starts outside the sandbox with the system's). LD_PRELOAD is left alone.
+ */
+export function prepareLinuxEnv(env, tmp) {
+	const run = path.join(tmp, 'run');
+	fs.mkdirSync(run, { mode: 0o700 });
+	env.XDG_RUNTIME_DIR = run;
+	if (env.LD_LIBRARY_PATH) {
+		const kept = env.LD_LIBRARY_PATH.split(':').filter(p => p && !p.startsWith('/run/awf-lib/'));
+		if (kept.length) {
+			env.LD_LIBRARY_PATH = kept.join(':');
+		} else {
+			delete env.LD_LIBRARY_PATH;
+		}
+	}
+	if (fs.existsSync('/etc/fonts/fonts.conf')) {
+		env.FONTCONFIG_FILE = '/etc/fonts/fonts.conf';
+	} else {
+		const conf = path.join(tmp, 'fonts.conf');
+		const dirs = ['/usr/share/fonts', '/usr/local/share/fonts'].filter(d => fs.existsSync(d));
+		fs.writeFileSync(conf, `<?xml version="1.0"?>\n<!DOCTYPE fontconfig SYSTEM "fonts.dtd">\n<fontconfig>\n${dirs.map(d => `\t<dir>${d}</dir>\n`).join('')}\t<cachedir>${path.join(tmp, 'fontconfig')}</cachedir>\n</fontconfig>\n`);
+		env.FONTCONFIG_FILE = conf;
+	}
+}
+
+/** Linux: the whole X display as a PNG (a dialog VS Code is stuck on), when xwd and ffmpeg are there. */
+function captureDisplay(display, out, env) {
+	try {
+		const xwd = `${out}.xwd`;
+		execFileSync('xwd', ['-root', '-silent', '-display', display, '-out', xwd], { env, timeout: 10_000, stdio: 'ignore' });
+		execFileSync(findFfmpeg(), ['-v', 'error', '-y', '-i', xwd, '-vf', 'scale=1300:-1', out], { timeout: 20_000, stdio: 'ignore' });
+		fs.rmSync(xwd, { force: true });
+		return out;
+	} catch {
+		return null;
+	}
+}
+
+/** The end of VS Code's own main-process log in a profile, if it wrote one. */
+function mainLogTail(userData, lines = 40) {
+	try {
+		const logs = path.join(userData, 'logs');
+		const latest = fs.readdirSync(logs).sort().at(-1);
+		const text = fs.readFileSync(path.join(logs, latest, 'main.log'), 'utf8');
+		return text.split('\n').slice(-lines).join('\n');
+	} catch {
+		return '';
+	}
+}
+
 /** How long VS Code may take to open its window. */
 const LAUNCH_TIMEOUT = 60_000;
 
@@ -114,7 +167,7 @@ function ignoreLaunchNoise() {
 	});
 }
 
-export async function openVSCode({ files = {}, settings = {}, signedIn = process.platform === 'darwin', log = console.log } = {}) {
+export async function openVSCode({ files = {}, settings = {}, signedIn = process.platform === 'darwin', log = console.log, failureShot = null } = {}) {
 	const exe = vscodePath();
 	const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'prs-demo-'));
 	let app, xserver;
@@ -174,7 +227,8 @@ export async function openVSCode({ files = {}, settings = {}, signedIn = process
 			'--disable-updates', '--disable-workspace-trust', '--new-window', workspace,
 		];
 		if (process.platform === 'linux') {
-			xserver = await ensureDisplay();
+			prepareLinuxEnv(env, tmp);
+			xserver = await ensureDisplay(env);
 			if (xserver) {
 				env.DISPLAY = xserver.display;
 			}
@@ -184,8 +238,10 @@ export async function openVSCode({ files = {}, settings = {}, signedIn = process
 		try {
 			app = await _electron.launch({ executablePath: exe, args, env, timeout: LAUNCH_TIMEOUT });
 		} catch (error) {
-			// Playwright's call log holds what VS Code printed: keep it whole, say its end.
-			throw new LaunchError(error, exe);
+			// Playwright's call log holds what VS Code printed: keep it whole, with VS Code's own log and the screen.
+			const shot = failureShot && xserver ? captureDisplay(xserver.display, failureShot, env) : null;
+			const main = mainLogTail(data);
+			throw new LaunchError(error, exe, [main && `VS Code's main log (end):\n${main}`, shot && `The display: ${shot}`].filter(Boolean).join('\n\n'));
 		}
 		const page = await app.firstWindow({ timeout: LAUNCH_TIMEOUT });
 		await app.evaluate(({ BrowserWindow }, s) => {
@@ -214,8 +270,8 @@ export async function openVSCode({ files = {}, settings = {}, signedIn = process
 
 /** VS Code did not start: the whole launch log is in `log`, its last lines in the message. */
 export class LaunchError extends Error {
-	constructor(error, exe) {
-		const log = String(error?.message ?? error);
+	constructor(error, exe, extra = '') {
+		const log = `${String(error?.message ?? error)}${extra ? `\n\n${extra}` : ''}`;
 		const tail = log.split('\n').map(l => l.trimEnd()).filter(Boolean).slice(-14).join('\n  ');
 		super(`VS Code did not start (${exe}): ${log.split('\n')[0]}\n  ${tail}`);
 		this.log = log;
@@ -492,7 +548,7 @@ export async function demoCheck() {
 	let build = null;
 	try {
 		build = buildInfo();
-		const vscode = await openVSCode({ files: { 'README.md': '# Check\n' }, log: () => { } });
+		const vscode = await openVSCode({ files: { 'README.md': '# Check\n' }, log: () => { }, failureShot: base + '.png' });
 		try {
 			if (process.platform !== 'darwin') {
 				await skipOnboarding(vscode.page);
@@ -536,7 +592,7 @@ export async function demo(slug, id, { signedIn = process.platform === 'darwin' 
 	const build = buildInfo();
 	let vscode;
 	try {
-		vscode = await openVSCode({ files: mod.files ?? { 'README.md': '# My project\n' }, settings: mod.settings ?? {}, signedIn, log });
+		vscode = await openVSCode({ files: mod.files ?? { 'README.md': '# My project\n' }, settings: mod.settings ?? {}, signedIn, log, failureShot: path.join(out, 'failure.png') });
 	} catch (error) {
 		fs.writeFileSync(path.join(out, 'failure.log'), error.log ?? String(error.stack ?? error));
 		fs.appendFileSync(failures, `${new Date().toISOString()} demo ${id}\n${error.log ?? error.message}\n=====\n`);
