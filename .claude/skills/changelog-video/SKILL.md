@@ -108,7 +108,9 @@ click" }]`, `"proof": "New Nested Session"`.
 
 - Keep what an arrow points at on screen a second after its phrase. When the next step hides it (typing closes a
   menu), cue that step later: `await cue('or a title', { offset: 1.3 })` ([example/demos/c4.mjs](example/demos/c4.mjs)).
-- A sentence of a dialog is a mark with `{ text, tight: true }` ([example/demos/c5.mjs](example/demos/c5.mjs)).
+- When the UI takes a varying time to show something (a link opening a dialog), `step()` when it shows and
+  `hold(2.2)` before the step that hides it ([example/demos/c5.mjs](example/demos/c5.mjs)).
+- A sentence of a dialog, or a line a terminal printed, is a mark with `{ text, tight: true }`.
 - The proof is the PR's text that one of the marks shows (a label, a description), never text the demo typed.
 - Signed out (CI, or a profile whose session expired; `prs demo` prints which), there is no chat and no agent
   session, and `openAgentsWindow()` stops: draw those chapters.

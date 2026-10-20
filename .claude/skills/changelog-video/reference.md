@@ -145,13 +145,15 @@ The helpers (`ctx`):
 | `mark(name, locator, { text, tight })` | follows that UI through the recording (below) |
 | `step(label)` | a moment worth a still (`{ "step": "label" }` in digest.json) |
 | `cue(phrase, { nth, offset })`, `cue.end()`, `begin()` | keep the narration's pace (below) |
+| `hold(seconds)` | keeps what the last `step()` showed on screen at least that long, however long the UI took to show it |
 
 **Marks.** A mark counts as on screen only when it really is: in the window, not transparent, not covered. Give each
 a locator that matches only its UI (filter by text only it shows). With `{ text }` it counts only while that text
 shows in it; with `{ text, tight: true }` its box is the text's own (a sentence of a dialog), not the element's.
 Prefer stable locators: `.setting-item-contents[data-key="<id>"]` (via `setting(id)`), `.monaco-dialog-box`,
 `.quick-input-widget .monaco-list-row`, `.suggest-widget .monaco-list-row`, `.monaco-list-row` filtered by text,
-`a.action-label[aria-label^="..."]`, `.monaco-hover`. `prs demo inspect <id>` prints the text on screen at the end of
+`a.action-label[aria-label^="..."]`, `.monaco-hover`, and a terminal's text: `.xterm-rows` with
+`{ text, tight: true }` (its last occurrence: the output, not the command that printed it). `prs demo inspect <id>` prints the text on screen at the end of
 a recording, with each element's class and box: use it when a locator doesn't match.
 
 **Pacing.** `cue(phrase)` waits until the chapter's narration says the phrase: do each step at the words that
@@ -159,7 +161,8 @@ describe it, and the recording plays as recorded, in sync with the voice. The na
 starts (or at `begin()`); `cue.end()` waits until it ends, and the clip ends there (what the script does after, such
 as cancelling a dialog, isn't shown). Record after `prs voice`; when the narration changes, record again
 (`prs digest check` says so). A step that takes longer than the narration allows makes the next cue late (the check
-says which): start it at an earlier cue.
+says which): start it at an earlier cue. When the UI takes a varying time to show something (a link that opens a
+dialog), `step()` when it shows and `hold(2.2)` before the step that hides it: its arrow then always has its time.
 
 **Agents window.** Open it in `setup()` and make what the recording needs there (a session: send a short, harmless
 prompt and wait for the reply), so the recording starts on it:

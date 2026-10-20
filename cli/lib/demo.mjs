@@ -9,14 +9,15 @@
 //   export default async function demo(ctx) { ... }   // recorded
 // ctx: page, run, palette, picker, pickerItem, setting, openUrl, terminal, chat.send/reply, moveTo, click, type,
 // press, sleep, scheme, workspace, openAgentsWindow (in setup: the recording is then of the Agents window), and in the
-// recorded part mark, step, cue and begin.
+// recorded part mark, step, cue, begin and hold.
 // mark(name, locator, { text, tight }) logs that element's box and the times it is shown (with { text }: only while
 // that text shows in it; with tight too, the box is the text's own: a sentence of a dialog):
 // marks are followed for the whole recording, so give each one a locator that matches only its UI (filter by its
 // text); step(label) logs a moment worth a still.
 // cue(phrase, { nth, offset }) waits until the chapter's narration says the phrase (record after prs voice): the
 // recording keeps the narration's pace and plays as recorded. The narration starts where the recording starts, or at
-// begin(); cue.end() waits until it ends, and the clip ends there (or where the script does).
+// begin(); cue.end() waits until it ends, and the clip ends there (or where the script does). hold(s) keeps what the
+// last step() showed on screen at least s seconds, however long the UI took to show it.
 //
 // The build: the project's when prs digest new built VS Code from main for it (picks.json), or PRS_VSCODE (the
 // executable: code-insiders on Linux; or VS Code built from source by prs build), or on macOS
@@ -597,7 +598,7 @@ function helpers(page, app) {
 			await run('Developer: Open URL');
 			await page.locator('.quick-input-widget input').first().waitFor({ state: 'visible', timeout: 10_000 });
 			await page.keyboard.insertText(url);
-			await sleep(700);
+			await sleep(350);
 			await page.keyboard.press('Enter');
 		},
 		/** Opens a new terminal and runs a command in it (typed); returns the terminal's text area (for a mark). */
@@ -707,7 +708,16 @@ async function screencast(page, dir) {
 /** The box of the first shown element of a locator's matches (or of a text inside it), in the page; null if none. */
 function measure(elements, { text, tight }) {
 	// On top: at least 2 of 3 points across its middle hit it (or something inside it): not covered by an overlay, not
-	// a row of a list that isn't the one on screen. Elements that let clicks through hit their parent: that counts.
+	// a row of a list that isn't the one on screen. Elements that let clicks through hit their parent: that counts. A
+	// layer that draws nothing there (transparent, no border, no text of its own: the widget layer over a terminal)
+	// doesn't cover it.
+	const draws = n => {
+		const st = getComputedStyle(n);
+		const clear = c => c === 'transparent' || /^rgba\(.*,\s*0\)$/.test(c);
+		return Number(st.opacity) > 0 && (!clear(st.backgroundColor) || st.backgroundImage !== 'none'
+			|| ['Top', 'Right', 'Bottom', 'Left'].some(side => parseFloat(st[`border${side}Width`]) > 0 && !clear(st[`border${side}Color`]))
+			|| [...n.childNodes].some(c => c.nodeType === 3 && c.data.trim()));
+	};
 	const onTop = (el, r) => {
 		let hits = 0;
 		for (const fx of [0.5, 0.2, 0.8]) {
@@ -715,8 +725,9 @@ function measure(elements, { text, tight }) {
 			if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) {
 				continue;
 			}
-			const hit = document.elementFromPoint(x, y);
-			if (hit && (hit === el || el.contains(hit) || hit.contains(el))) {
+			const mine = n => n === el || el.contains(n) || n.contains(el);
+			const hit = document.elementsFromPoint(x, y).find(n => mine(n) || draws(n));
+			if (hit && mine(hit)) {
 				hits++;
 			}
 		}
@@ -739,7 +750,9 @@ function measure(elements, { text, tight }) {
 				nodes.push({ node: walker.currentNode, from: all.length });
 				all += walker.currentNode.data;
 			}
-			const at = all.indexOf(text);
+			// A terminal draws its spaces as no-break spaces: they count as spaces (one for one: the offsets hold). The last
+			// time the text shows: a terminal's output comes after the command that printed it.
+			const at = all.replace(/\u00a0/g, ' ').lastIndexOf(text.replace(/\u00a0/g, ' '));
 			if (at < 0) {
 				continue;
 			}
@@ -1038,7 +1051,7 @@ export async function demo(slug, id, { signedIn = process.platform === 'darwin' 
 			const notYet = () => {
 				throw new Error('cue() and begin() pace the recording: use them in the demo, not in setup()');
 			};
-			await mod.setup({ ...ctxFor(), mark: () => { }, step: () => { }, begin: notYet, cue: Object.assign(notYet, { end: notYet }) });
+			await mod.setup({ ...ctxFor(), mark: () => { }, step: () => { }, begin: notYet, cue: Object.assign(notYet, { end: notYet }), hold: notYet });
 		}
 		// The narration of the chapter that shows this demo: cue(phrase) waits until the video says it.
 		const { demoNarration, cueTime } = await import('./digest.mjs');
@@ -1085,11 +1098,22 @@ export async function demo(slug, id, { signedIn = process.platform === 'darwin' 
 			}
 			sync.at = now();
 		};
+		// hold(s): what the last step() showed stays on screen at least s seconds (however long the UI took to show it).
+		let lastStep = null;
+		const hold = async seconds => {
+			const wait = lastStep === null ? 0 : lastStep + seconds - now();
+			if (wait > 0) {
+				await sleep(wait * 1000);
+			}
+		};
 		await mod.default({
 			...ctxFor(),
 			mark: (name, locator, options) => tracker.mark(name, locator, options),
-			step: label => steps.push({ label: String(label), t: +(Date.now() / 1000 - start).toFixed(2) }),
-			begin, cue,
+			step: label => {
+				lastStep = now();
+				steps.push({ label: String(label), t: +lastStep.toFixed(2) });
+			},
+			begin, cue, hold,
 		});
 		sync.end ??= now();
 		await sleep(600);
