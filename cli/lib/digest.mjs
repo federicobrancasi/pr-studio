@@ -453,7 +453,8 @@ export async function planDigest(slug) {
 		throw new Error(`No narration yet: write storyboard.json, then run prs voice ${slug}`);
 	}
 	const timeline = readJson(tlFile);
-	const timing = { ...TIMING, ...(digest.timing ?? {}) };
+	// MAI-Voice-2 reads a little slower than Kokoro: it plays a touch faster (1.08, as in the Oct 19 video).
+	const timing = { ...TIMING, ...(timeline.voice?.provider === 'mai' ? { tempo: 1.08 } : {}), ...(digest.timing ?? {}) };
 	const tempo = timing.tempo || 1;
 	const picks = new Map(picksDoc.picks.map(p => [p.rank, p]));
 	const segments = [], words = [], audio = [];
@@ -549,13 +550,15 @@ export async function planDigest(slug) {
 	}
 	const { long, short } = prettyDate(digest.date ?? picksDoc.date);
 	const build = picksDoc.build;
-	const buildName = build ? `${build.name ?? 'VS Code'}${build.version ? ` ${build.version.replace(/-insider$/, '')}` : ''}` : 'VS Code';
+	// Named as people say it: "VS Code Insiders", with its release (1.143) where the video credits the recordings.
+	const product = build && /insider/i.test(`${build.quality ?? ''} ${build.name ?? ''}`) ? 'VS Code Insiders' : 'VS Code';
+	const release = build?.version?.match(/^\d+\.\d+/)?.[0];
 	const n = segments.filter(s => s.kind === 'chapter').length;
 	const meta = {
 		title: 'VS Code Changelog', date: long, dateShort: short,
 		subtitle: `the top ${NUMBERS[n] ?? n} changes merged in the last day`,
-		build: buildName, channel: '#changelog',
-		made: anyDemo ? `Demos recorded in ${buildName} · made with pr-studio` : 'Made with pr-studio',
+		build: product, channel: '#changelog',
+		made: anyDemo ? `Demos recorded in ${product}${release ? ` ${release}` : ''} · made with pr-studio` : 'Made with pr-studio',
 		...(digest.meta ?? {}),
 	};
 	return { data: { meta, fps: FPS, total: r3(at), timing, segments, words }, audio, tempo };
