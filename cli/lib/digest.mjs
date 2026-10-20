@@ -435,12 +435,14 @@ function targetWindows(id, name, spec, { start, end, kit, demo, recording }, pro
 		}
 		const windows = [];
 		m.visible.forEach(([ca, cb], i) => {
-			if (proofs.length && !proofs.every(p => proofText(m.texts?.[i] ?? '').includes(p))) {
+			// Shown only after the recording's end: not in any frame of the video.
+			if (ca >= recording.cEnd || proofs.length && !proofs.every(p => proofText(m.texts?.[i] ?? '').includes(p))) {
 				return;
 			}
 			const steady = steadyFrom(m.track, ca, cb);
 			if (steady !== null) {
-				windows.push([recording.toVideo(steady), cb >= recording.cEnd - 0.05 ? end : recording.toVideo(cb), steady]);
+				// To the chapter's end only when it was still seen at the recording's end.
+				windows.push([recording.toVideo(steady), cb >= recording.cEnd - 0.005 ? end : recording.toVideo(cb), steady]);
 			}
 		});
 		if (!windows.length) {
@@ -610,6 +612,26 @@ export function steadyFrom(track, a, b) {
 	return null;
 }
 
+/**
+ * A recording's marks with each window ending where its mark was last seen. Recordings made before pr-studio logged
+ * it so end where the mark was first missed, up to a tenth of a second after it closed: a ring held to that moment
+ * can be on nothing. A window that lasts to the recording's end stays as it is.
+ */
+export function seenWindows(demo) {
+	for (const m of Object.values(demo.marks ?? {})) {
+		const seen = (m.track ?? []).map(s => s[0]);
+		m.visible = (m.visible ?? []).map(([a, b]) => {
+			const last = b >= demo.duration - 0.01 ? b : seen.filter(t => t >= a - 0.005 && t <= b + 0.005).at(-1);
+			return [a, last ?? b];
+		});
+	}
+	return demo;
+}
+
+function readDemo(file) {
+	return seenWindows(readJson(file));
+}
+
 export async function planDigest(slug) {
 	const kit = await loadSceneDocs();
 	const dir = videoDir(slug), bdir = buildDir(slug);
@@ -649,7 +671,7 @@ export async function planDigest(slug) {
 				if (!fs.existsSync(demoFile)) {
 					throw new Error(`Demo "${visual.demo}" is not recorded${where}: run prs demo ${visual.demo}`);
 				}
-				const demo = readJson(demoFile);
+				const demo = readDemo(demoFile);
 				const clipSpec = ch.clip ?? {};
 				// A demo paced by cue() plays as recorded (1x): its narration starts where it called begin() (or where the
 				// recording starts), and the clip ends where its script ends. Recorded for other words, it's out of sync.
@@ -689,10 +711,10 @@ export async function planDigest(slug) {
 					}
 					// When it is on screen in the video (the hold on the last frame included), and where it is in each frame
 					// of the recording (the player looks its box up at the frame it shows).
+					// Through the hold only when it was still seen at the recording's end: a ring never stays on what closed.
 					const windows = m.visible
-						.map(([a, b]) => [Math.max(a, cStart), Math.min(b, cEnd)])
-						.filter(([a, b]) => b - a > 0.05)
-						.map(([a, b]) => [r3(at + inv(a)), r3(at + (b >= cEnd - 0.05 ? dur : inv(b)))]);
+						.filter(([a, b]) => Math.min(b, cEnd) - Math.max(a, cStart) > 0.05)
+						.map(([a, b]) => [r3(at + inv(a)), r3(at + (b >= cEnd - 0.005 ? dur : inv(b)))]);
 					targets[name] = { rect: m.rect, windows, visible: m.visible, track: m.track ?? [], text: m.text ?? '' };
 				}
 				steps = demo.steps.map(s => ({ label: s.label, at: r3(at + inv(s.t)) }));
@@ -982,7 +1004,7 @@ export async function checkDigest(slug) {
 			if (!fs.existsSync(f)) {
 				problems.push(`${id}: demo "${v.demo}" not recorded yet (prs demo ${v.demo})`);
 			} else {
-				const demo = readJson(f);
+				const demo = readDemo(f);
 				if (!entries.length) {
 					problems.push(`${id}: a demo needs "focus": the mark that shows the change (its Now row points to it)`);
 				}

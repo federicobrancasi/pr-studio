@@ -836,7 +836,8 @@ export function summarizeMarks(marks, t0, duration, viewport = [SIZE.width, SIZE
 				open.to = s.t;
 				open.boxes.push(s.box);
 			} else if (open) {
-				windows.push({ ...open, to: s.t });
+				// It ends where it was last seen, not at the first sample that missed it: it may have closed just after.
+				windows.push(open);
 				open = null;
 			}
 		}
@@ -1091,6 +1092,8 @@ export async function demo(slug, id, { signedIn = process.platform === 'darwin' 
 		cue.end = async ({ offset = 0 } = {}) => {
 			await waitUntil((narration?.end ?? 0) + (narration?.tail ?? 0) + offset, 'cue.end()');
 			sync.end = now();
+			// What the script does next (closing a picker) comes after the clip's last frames, not in them.
+			await sleep(300);
 		};
 		const begin = () => {
 			if (sync.at !== null) {

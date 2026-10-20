@@ -1,7 +1,7 @@
 // The changelog digest: its times (phrases of the narration, demo marks, steps) and the strip's height.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { changesADefault, unshownParts, valueChanges, fitZoom, focusShows, iconsOf, inProof, loadSceneDocs, orderStrip, planFocus, proofCorpus, resolveTime, resolveTimes, steadyFrom, stripHeight } from '../cli/lib/digest.mjs';
+import { changesADefault, unshownParts, valueChanges, fitZoom, focusShows, iconsOf, inProof, loadSceneDocs, orderStrip, planFocus, proofCorpus, resolveTime, resolveTimes, seenWindows, steadyFrom, stripHeight } from '../cli/lib/digest.mjs';
 
 // A chapter that starts 10 s into the video: "Five. VS Code links can now add a plugin marketplace."
 const words = ['Five.', 'VS', 'Code', 'links', 'can', 'now', 'add', 'a', 'plugin', 'marketplace.']
@@ -281,6 +281,28 @@ test('a recording starts 1.2 s before its focus first shows the proof: how the d
 	], [5.83, 0, 0]);
 });
 
+
+test('an arrow ends where its mark was last seen: its ring never stays on a picker that closed at the clip\'s end', () => {
+	const seen = (rect, from, to) => Array.from({ length: Math.round((to - from) * 10) + 1 }, (_, k) => [Math.round((from + k / 10) * 100) / 100, ...rect]);
+	const rect = [100, 100, 300, 40];
+	// As recordings were logged before: the closing picker's window ends at the first sample that missed it (9.1).
+	const demo = seenWindows({
+		duration: 10.37, marks: {
+			closing: { rect, visible: [[3, 9.1]], texts: [''], track: seen(rect, 3, 9) },
+			staying: { rect, visible: [[3, 10.37]], texts: [''], track: seen(rect, 3, 10.3) },
+		},
+	});
+	const plan = part => planFocus('c5', { now: { at: 21, rows: [{ id: 'on', text: 'Copilot Global' }] }, focus: part }, { start: 20, end: 31, targets: {}, kit: {}, demo: {}, clip: {}, recording: { toVideo: c => 20 + c, cEnd: 9.05, marks: demo.marks } });
+	assert.deepStrictEqual({
+		windows: [demo.marks.closing.visible, demo.marks.staying.visible],
+		// The clip ends at 9.05 s: the closing picker was last seen at 9.0 s, so its arrow ends there (29 s), not in the
+		// hold on the last frame; the one still there at the end is held to the chapter's end (31 s).
+		until: [plan('closing').focus[0]?.until, plan('staying').focus[0]?.until],
+	}, {
+		windows: [[[3, 9]], [[3, 10.37]]],
+		until: [29, 31],
+	});
+});
 
 test('a recorded mark on screen to the recording\'s end keeps its last box through the hold on the last frame', async () => {
 	const { trackBoxAt } = await import('../digest/track.js');
