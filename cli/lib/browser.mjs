@@ -39,8 +39,9 @@ export async function launch() {
 	}
 	return chromium.launch({
 		executablePath, headless: true,
-		// macOS renders on the GPU (Metal); elsewhere, software rendering is the same on every machine and in CI.
-		args: ['--headless=new', '--hide-scrollbars', '--force-color-profile=srgb',
+		// macOS renders on the GPU (Metal); elsewhere, software rendering is the same on every machine and in CI. It
+		// renders local files only: no proxy, so its background requests never reach a sandbox's proxy.
+		args: ['--headless=new', '--hide-scrollbars', '--force-color-profile=srgb', '--no-proxy-server',
 			...(process.platform === 'darwin' && process.env.RENDER_GPU !== 'software'
 				? ['--use-angle=metal', '--ignore-gpu-blocklist', '--enable-gpu-rasterization']
 				: ['--disable-gpu', '--disable-dev-shm-usage', '--font-render-hinting=none'])],

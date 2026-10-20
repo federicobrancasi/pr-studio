@@ -22,7 +22,7 @@ import path from 'node:path';
 import { execFileSync, spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { _electron } from 'playwright-core';
-import { buildDir, findFfmpeg, videoDir, writeJson } from './common.mjs';
+import { buildDir, findFfmpeg, isOffline, videoDir, writeJson } from './common.mjs';
 import { launch } from './browser.mjs';
 import { trackBoxAt } from '../../digest/track.js';
 
@@ -320,6 +320,13 @@ export async function openVSCode({ files = {}, settings = {}, signedIn = process
 			'--skip-release-notes', '--skip-welcome', '--disable-telemetry', '--disable-experiments', '--no-cached-data',
 			'--disable-updates', '--disable-workspace-trust', '--new-window', workspace,
 		];
+		if (isOffline()) {
+			// Offline (a sandbox whose only way out is its proxy): VS Code's requests fail here, without reaching it.
+			args.unshift('--no-proxy-server');
+			for (const name of ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy']) {
+				delete env[name];
+			}
+		}
 		if (process.platform === 'linux') {
 			prepareLinuxEnv(env, tmp);
 			xserver = await ensureDisplay(env);
