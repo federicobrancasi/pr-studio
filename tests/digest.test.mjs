@@ -179,6 +179,26 @@ test('the camera moves on to a part out of its view, once the arrow before has h
 	});
 });
 
+test('a drawn picker gives a disabled entry\'s reason, and a drawn editor shows only lines of the PR', async () => {
+	const kit = await loadSceneDocs();
+	// The PR localizes the reason with a link ("[Learn why]({0})"); the scene shows it as text, with its codicon.
+	const corpus = proofCorpus('description: localize(\'x\', "Disabled by policy · [Learn why]({0})"); paths.set(\'example.txt\', \'/home/john/Downloads/example.txt\');');
+	const picker = kit.picker.proofs({ items: [{ label: 'Copilot' }, { label: 'Local', disabled: true, description: '$(briefcase) Disabled by policy · Learn why' }] });
+	const noReason = kit.picker.proofs({ items: [{ label: 'Copilot' }, { label: 'Local', disabled: true }] });
+	const editor = kit.editor.proofs({ insert: '/home/john/Downloads/example.txt\n/home/me/made-up.txt' });
+	assert.deepStrictEqual({
+		picker: picker.map(x => [x.param, inProof(corpus, x.text)]),
+		noReason: noReason.map(x => [x.param, x.text]),
+		editor: editor.map(x => [x.text, inProof(corpus, x.text)]),
+		windows: kit.editor.windows({ insertAt: 12 }, { start: 10, end: 20 }),
+	}, {
+		picker: [['items[1].description', true]],
+		noReason: [['items[1].description', undefined]],
+		editor: [['/home/john/Downloads/example.txt', true], ['/home/me/made-up.txt', false]],
+		windows: { editor: [10, 20], inserted: [12.05, 20] },
+	});
+});
+
 test('every icon a chapter uses is found: in rows, heads and scene params', () => {
 	assert.deepStrictEqual(iconsOf({
 		before: { icon: 'history', rows: [{ id: 'a', icon: 'pin', text: 'Pin' }] },

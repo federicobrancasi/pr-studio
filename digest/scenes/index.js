@@ -9,9 +9,11 @@ import dialog from './dialog.js';
 import setting from './setting.js';
 import commandPalette from './command-palette.js';
 import notification from './notification.js';
+import picker from './picker.js';
+import editor from './editor.js';
 import card from './card.js';
 
-export const SCENES = Object.fromEntries([buttonSwap, appBadge, listActions, slashMenu, dialog, setting, commandPalette, notification, card].map(s => [s.name, s]));
+export const SCENES = Object.fromEntries([buttonSwap, appBadge, listActions, slashMenu, dialog, setting, commandPalette, notification, picker, editor, card].map(s => [s.name, s]));
 
 // What an "icon" param can be (Fluent icons, and "github" for the GitHub mark): prs digest check verifies them.
 export { ICON_NAMES } from '../../theme/icons.js';

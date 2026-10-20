@@ -1,6 +1,8 @@
 // prs digest: the daily changelog video, one for the top picks of a #changelog report, in the "before → after" design
 // (digest/player.js). The agent writes the project; prs digest builds and checks it.
-//   prs digest new [--run id | --file report.md]   fetch the report's top picks into videos/changelog-<date>/
+//   prs digest new [--run id | --file report.md] [--build auto|main|insiders]
+//                                                  fetch the report's top picks into videos/changelog-<date>/, and
+//                                                  build VS Code from main when Insiders doesn't have them (auto)
 //   prs digest check [slug]                        what is missing or wrong (narration cues, marks, strip heights)
 //   prs digest stills [slug] --at 3,12.5           single frames + a contact sheet (fast)
 //   prs digest render [slug]                       the whole video, delivered with its captions and a summary
@@ -80,7 +82,7 @@ export function digestSlug(arg) {
 // prs digest new
 
 /** The picks of a report and the PRs behind them, fetched; the project skeleton. */
-export async function newDigest({ run = null, file = null } = {}) {
+export async function newDigest({ run = null, file = null, build: buildMode = 'auto' } = {}) {
 	const { downloadReport, parseReport, topPicks } = await import('./changelog.mjs');
 	const text = file ? fs.readFileSync(file, 'utf8') : (await downloadReport({ run })).text;
 	const report = parseReport(text);
@@ -115,7 +117,39 @@ export async function newDigest({ run = null, file = null } = {}) {
 			title: pick.title, summary: pick.summary, author: pick.author ?? data.facts.authorLogin, slug: ref.slug,
 			mergedAt: data.facts.mergedAt ?? null,
 			inBuild: await inBuild(data.facts, build),
+			facts: data.facts,
 		});
+	}
+	// In a release week Insiders is built from the release branch: the picks merged to main are in no build. Then the
+	// demos record VS Code built from main as of the last pick (prs build), and the project remembers that build.
+	const missing = entries.filter(e => e.inBuild === false).length;
+	if (buildMode === 'main' || (buildMode === 'auto' && missing && !process.env.PRS_VSCODE)) {
+		const last = entries.map(e => e.mergedAt).filter(Boolean).sort().at(-1);
+		try {
+			const { buildFromSource, cachedBuilds } = await import('./build.mjs');
+			console.log(missing ? `${missing} of the ${entries.length} picks are not in ${build?.name ?? 'the installed build'}: VS Code built from main has them` : 'The demos use VS Code built from main');
+			// A build of main done before that has every pick (another day's, a later commit) saves building one.
+			let dir = null;
+			for (const b of cachedBuilds()) {
+				const candidate = { ...buildInfo(b.dir), path: b.dir };
+				const has = await Promise.all(entries.map(e => inBuild(e.facts, candidate)));
+				if (has.every(x => x === true)) {
+					dir = b.dir;
+					console.log(`VS Code ${b.version} (${b.commit.slice(0, 9)}), built before, has every pick: ${dir}`);
+					break;
+				}
+			}
+			dir ??= await buildFromSource({ at: last ? new Date(Date.parse(last) + 60_000).toISOString() : null });
+			build = { ...buildInfo(dir), path: dir };
+			for (const e of entries) {
+				e.inBuild = await inBuild(e.facts, build);
+			}
+		} catch (error) {
+			console.log(`VS Code couldn't be built from main (${error.message.split('\n')[0]}): the demos use ${build?.name ?? 'no build'}, and picks that aren't in it are drawn`);
+		}
+	}
+	for (const e of entries) {
+		delete e.facts;
 	}
 	writeJson(path.join(dir, 'picks.json'), { date: report.date, title: report.title, build, picks: entries });
 	if (!fs.existsSync(path.join(dir, 'digest.json'))) {
@@ -167,7 +201,7 @@ function brief(report, picks, build) {
 	const lines = [
 		`# ${report.title}`, '',
 		`The top ${picks.length} picks of the #changelog report: one chapter each, in this order. Read each PR's brief before writing its chapter.`,
-		build ? `Demos run in ${build.name}${build.version ? ` ${build.version}` : ''} (commit ${build.commit?.slice(0, 10) ?? '?'}).` : 'No VS Code build found: set PRS_VSCODE before recording demos.', '',
+		build ? `Demos run in ${build.name}${build.version ? ` ${build.version}` : ''}${build.path ? `, built from main (${build.path}; prs demo uses it)` : ''} (commit ${build.commit?.slice(0, 10) ?? '?'}).` : 'No VS Code build found: set PRS_VSCODE before recording demos.', '',
 	];
 	for (const [i, p] of picks.entries()) {
 		lines.push(
@@ -712,12 +746,14 @@ export async function planDigest(slug) {
 // ---------------------------------------------------------------------------------------------------------------
 // Proofs: what a chapter shows must be the PR's own text
 
-/** Text as compared for proofs: case, spacing, mnemonics (&&), Markdown markers and escapes don't count. */
+/** Text as compared for proofs: case, spacing, mnemonics (&&), Markdown markers, links and escapes, and codicons don't count. */
 export function proofText(text) {
 	return String(text ?? '').toLowerCase()
 		.replace(/&&/g, '')
 		.replace(/[\u2018\u2019]/g, '\'').replace(/[\u201c\u201d]/g, '"')
 		.replace(/\\[nrt]/g, ' ')
+		.replace(/\$\([\w~-]+\)/g, '')
+		.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
 		.replace(/[`*\\]/g, '')
 		.replace(/\s+/g, ' ')
 		.trim();
@@ -1215,8 +1251,12 @@ export async function digestCommand(args) {
 	const sub = args._[0];
 	switch (sub) {
 		case 'new': {
-			const { slug, picks, build } = await newDigest({ run: args.run ?? null, file: args.file ?? null });
-			console.log(`videos/${slug}: ${picks.length} picks${build ? `, demos in ${build.name} ${build.version ?? ''}` : ''}`);
+			const mode = args.build ?? 'auto';
+			if (!['auto', 'main', 'insiders'].includes(mode)) {
+				throw new Error(`--build is auto (VS Code from main when Insiders lacks the picks), main or insiders: ${mode}`);
+			}
+			const { slug, picks, build } = await newDigest({ run: args.run ?? null, file: args.file ?? null, build: mode });
+			console.log(`videos/${slug}: ${picks.length} picks${build ? `, demos in ${build.name} ${build.version ?? ''}${build.path ? ' built from main' : ''}` : ''}`);
 			for (const [i, p] of picks.entries()) {
 				console.log(`  c${i + 1} #${p.number} ${p.title}${p.inBuild === false ? '  (not in the demo build)' : ''}`);
 			}
@@ -1273,7 +1313,7 @@ export async function digestCommand(args) {
 			return 0;
 		}
 		default:
-			console.log('prs digest new [--run id | --file report.md] | check | stills [--at 1,2] | render | scenes');
+			console.log('prs digest new [--run id | --file report.md] [--build auto|main|insiders] | check | stills [--at 1,2] | render | scenes');
 			return sub ? 1 : 0;
 	}
 }

@@ -17,6 +17,18 @@ export function sourceBuildDir(commit) {
 	return path.join(CACHE, `vscode-${commit.slice(0, 9)}`);
 }
 
+/** The builds done in the cache, the latest commit first: { dir, commit, committedAt, version }. */
+export function cachedBuilds() {
+	if (!fs.existsSync(CACHE)) {
+		return [];
+	}
+	return fs.readdirSync(CACHE)
+		.map(name => path.join(CACHE, name))
+		.filter(dir => fs.existsSync(path.join(dir, '.prs-build.json')))
+		.map(dir => ({ dir, ...JSON.parse(fs.readFileSync(path.join(dir, '.prs-build.json'), 'utf8')) }))
+		.sort((a, b) => String(b.committedAt ?? '').localeCompare(String(a.committedAt ?? '')));
+}
+
 /** The last commit on microsoft/vscode main at a time (ISO 8601). */
 export async function mainAt(time) {
 	const commits = await api(`repos/${REPO}/commits?sha=main&until=${encodeURIComponent(time)}&per_page=1`);
