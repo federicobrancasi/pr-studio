@@ -108,7 +108,12 @@ function buildStrip(host, items) {
 				node.innerHTML = `${iconSlot(it.icon, 26)}<span>${esc(it.text)}</span>`;
 			} else if (it.kind === 'setting') {
 				node.className = 'ba-setting';
-				node.innerHTML = `<div class="lbl">${iconSlot('settings', 24)}Setting</div><code>${esc(it.name)}</code>${it.state ? `<div class="state"><span class="ba-toggle"><i></i></span>${esc(it.state)}</div>` : ''}`;
+				node.innerHTML = `<div class="lbl">${iconSlot('settings', 24)}Setting</div><code>${esc(it.name)}</code>${it.state ? `<div class="state">${it.toggle ? '<span class="ba-toggle"><i></i></span>' : ''}${esc(it.state)}</div>` : ''}`;
+				// A long setting ID shrinks to fit its card, on one line.
+				const code = node.querySelector('code'), room = COL.w - 40;
+				if (code.scrollWidth > room) {
+					code.style.fontSize = `${Math.max(14, 22 * room / code.scrollWidth).toFixed(2)}px`;
+				}
 			} else {
 				node.className = `ba-row ${it.tone ?? 'plain'}`;
 				node.innerHTML = rowHtml(it);
@@ -147,7 +152,7 @@ function renderStrip(strip, t) {
 		}
 		const tog = node.querySelector('.ba-toggle');
 		if (tog) {
-			const flip = it.toggle === 'flip' ? it.flipAt ?? it.at + 0.25 : it.kind === 'setting' ? it.at + 0.3 : undefined;
+			const flip = it.toggle === 'flip' ? it.flipAt ?? it.at + (it.kind === 'setting' ? 0.3 : 0.25) : undefined;
 			setToggle(tog, flip !== undefined ? standard(clamp((t - flip) / 0.35)) : it.toggle === 'on' ? 1 : 0);
 		}
 	}
@@ -239,7 +244,7 @@ export default function createPlayer(root, DATA) {
 		items.push({ kind: 'head', tone: n.tone ?? 'blue', icon: n.icon ?? 'sparkle', text: n.head ?? 'Now', at: n.at - 0.1, pulseAt: n.pulseAt });
 		n.rows.forEach((r, i) => items.push({ ...r, kind: 'row', at: r.at ?? n.at + 0.12 * i, tone: r.tone ?? (r.changed === false ? undefined : 'green') }));
 		if (s.setting) {
-			items.push({ kind: 'setting', name: s.setting.name, state: s.setting.state, at: s.setting.at ?? n.at + 0.35 });
+			items.push({ kind: 'setting', name: s.setting.name, state: s.setting.state, toggle: s.setting.toggle, flipAt: s.setting.flipAt, at: s.setting.at ?? n.at + 0.35 });
 		}
 		const strip = buildStrip(stripHost, items);
 		return { strip, camera: seg.camera ?? [], scene };

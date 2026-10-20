@@ -1,7 +1,7 @@
 // The changelog digest: its times (phrases of the narration, demo marks, steps) and the strip's height.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { changesADefault, fitZoom, focusShows, iconsOf, inProof, loadSceneDocs, orderStrip, planFocus, proofCorpus, resolveTime, resolveTimes, steadyFrom, stripHeight } from '../cli/lib/digest.mjs';
+import { changesADefault, valueChanges, fitZoom, focusShows, iconsOf, inProof, loadSceneDocs, orderStrip, planFocus, proofCorpus, resolveTime, resolveTimes, steadyFrom, stripHeight } from '../cli/lib/digest.mjs';
 
 // A chapter that starts 10 s into the video: "Five. VS Code links can now add a plugin marketplace."
 const words = ['Five.', 'VS', 'Code', 'links', 'can', 'now', 'add', 'a', 'plugin', 'marketplace.']
@@ -144,23 +144,35 @@ test('a drawn setting has VS Code\'s own title, and no invented badge', async ()
 	}, { params: [], proofs: ['id', 'description'] });
 });
 
-test('a drawn setting changes its value only when the PR changes a default', async () => {
+test('a toggle flips, and a drawn setting changes its value, only when the PR changes a default', async () => {
 	const kit = await loadSceneDocs();
 	const flips = p => kit.setting.changesDefault(p);
+	const claims = ch => valueChanges(ch, kit).length;
 	assert.deepStrictEqual({
 		flips: [flips({ before: false, after: true }), flips({ after: true }), flips({ before: true, after: true }), flips({ kind: 'text', before: 'a', after: 'b' })],
+		claims: [
+			claims({ now: { rows: [{ text: 'On', toggle: 'flip' }] } }),
+			claims({ before: { rows: [{ text: 'Off', toggle: 'off' }] }, now: { rows: [{ text: 'On', toggle: 'on' }] } }),
+			claims({ now: { rows: [{ text: 'On', toggle: 'on' }] }, setting: { name: 'x', state: 'On', toggle: 'on' } }),
+			claims({ now: { rows: [{ text: 'Fusion' }] }, setting: { name: 'x', state: 'Fusion', toggle: 'flip' } }),
+			claims({ now: { rows: [{ text: 'Fusion' }] }, visual: { scene: { name: 'setting', params: { id: 'x', before: false, after: true } } } }),
+		],
 		defaults: [
 			'+\t\tdefault: isImageGenerationEnabledByDefault(product.quality),',
 			'+      "default": true,',
+			'+export const SESSIONS_APPLICATION_BADGE_DEFAULT = true;',
 			'+\t\tdefault: return getAutoModeTierLabel(tier);',
 			'+\t\tdefault:',
+			'+\tconst defaultChat = buildDefaultChatUri(session);',
 			'-\t\tdefault: false,',
 			' \t\tdefault: false,',
 		].map(changesADefault),
 	}, {
 		flips: [true, false, false, true],
-		// A setting's default added or changed counts; a switch's default case, a removed or unchanged line doesn't.
-		defaults: [true, true, false, false, false, false],
+		claims: [1, 1, 0, 1, 1],
+		// A setting's default added or changed, or a default constant, counts; a switch's default case, a variable that
+		// merely starts with "default", a removed or unchanged line doesn't.
+		defaults: [true, true, true, false, false, false, false, false],
 	});
 });
 

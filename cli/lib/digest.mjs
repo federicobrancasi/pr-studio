@@ -625,11 +625,40 @@ function prDiff(prSlug) {
 }
 
 /**
- * Whether a diff adds or changes a setting's default: an added `default: <value>` (or `"default": <value>`) property,
- * not a switch's `default:` case.
+ * Whether a diff adds or changes a setting's default: an added `default: <value>` property (not a switch's `default:`
+ * case), or a default kept in a constant or function (`FOO_DEFAULT = true`, `enabledByDefault = …`,
+ * `function isOnByDefault(`).
  */
 export function changesADefault(diff) {
-	return diff.split('\n').some(line => /^\+(?!\+\+)\s*["']?default["']?\s*:\s*(?!return\b|break\b|throw\b|continue\b)[^\s;{][^;{]*$/.test(line));
+	return diff.split('\n').filter(l => l.startsWith('+') && !l.startsWith('+++')).map(l => l.slice(1)).some(l =>
+		/^\s*["']?default["']?\s*:\s*(?!return\b|break\b|throw\b|continue\b)[^\s;{][^;{]*$/.test(l)
+		|| /\b(?:[A-Z0-9_]*DEFAULT[A-Z0-9_]*|\w+Default)\s*=(?![=>])/.test(l)
+		|| /\bfunction\s+\w+Default\s*\(/.test(l));
+}
+
+/**
+ * What a chapter shows a value changing with: a toggle that flips, Before and Now toggles that differ, a drawn setting
+ * whose value flips. Each says a default changed.
+ */
+export function valueChanges(ch, kit) {
+	const out = [];
+	const before = ch.before?.rows ?? [], now = ch.now?.rows ?? [];
+	for (const r of [...before, ...now].filter(r => r.toggle === 'flip')) {
+		out.push(`the row "${r.text}" flips its toggle`);
+	}
+	if (ch.setting?.toggle === 'flip') {
+		out.push('the setting card flips its toggle');
+	}
+	const states = rows => new Set(rows.map(r => r.toggle).filter(t => t === 'on' || t === 'off'));
+	const was = states(before), is = states(now);
+	if (was.size && [...is].some(s => !was.has(s))) {
+		out.push('its Before and Now toggles differ');
+	}
+	const scene = ch.visual?.scene;
+	if (scene && kit[scene.name]?.changesDefault?.(scene.params ?? {})) {
+		out.push(`the ${scene.name} scene changes the value (before → after)`);
+	}
+	return out;
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -713,16 +742,17 @@ export async function checkDigest(slug) {
 						problems.push(`${id}: "${proof.text}" (${scene.name}, ${proof.param}) is not in ${where}: draw only the PR's own strings, or show the change on a card`);
 					}
 				}
-				// A value that flips says the default changed: only when the PR changes a default.
-				const diff = prDiff(pick.slug);
-				if (kind.changesDefault?.(scene.params ?? {}) && diff !== null && !changesADefault(diff)) {
-					problems.push(`${id}: the ${scene.name} scene changes the value (before → after), but #${pick.number} doesn't change a default: leave out "before" and "flipAt" (the setting is shown as it is)`);
-				}
+				// A value that flips says the default changed: only when the PR changes a default (checked below).
 			}
 		}
 		const text = JSON.stringify(ch);
 		if (/TODO/.test(text)) {
 			problems.push(`${id}: still has TODOs`);
+		}
+		const claims = valueChanges(ch, kit);
+		const diff = claims.length ? prDiff(pick.slug) : null;
+		if (diff !== null && !changesADefault(diff)) {
+			problems.push(`${id}: ${claims.join('; ')}, but #${pick.number} doesn't change a default: show the state as it is (a toggle "on" or "off", not "flip"; a drawn setting without "before")`);
 		}
 		if ((ch.headline ?? '').length > 52) {
 			problems.push(`${id}: the headline is ${ch.headline.length} characters; keep it under 52 (one line)`);

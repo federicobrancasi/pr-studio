@@ -154,7 +154,7 @@ A chapter with a scene:
 	"eyebrow": "When you're signed out",
 	"before": { "at": "When", "rows": [{ "id": "old", "style": "chip", "icon": "chat", "text": "Try out the new Agents window" }] },
 	"now": { "at": "Sign in to GitHub", "rows": [{ "id": "new", "style": "chip", "icon": "github", "text": "Sign in to GitHub" }] },
-	"setting": { "name": "chat.welcomePage.signIn.enabled", "state": "On by default", "at": "A setting" },
+	"setting": { "name": "chat.welcomePage.signIn.enabled", "state": "On by default", "toggle": "flip", "at": "A setting" },
 	"visual": { "scene": { "name": "button-swap", "params": {
 		"tab": "Welcome", "swapAt": "Sign in to GitHub",
 		"before": { "text": "Try out the new Agents window", "icon": "chat" },
@@ -207,7 +207,9 @@ A chapter with a card:
   characters; `sub` for a second line), `style` (`chip`: a dark button with `icon`, `"github"` for the GitHub mark;
   `button`: a blue button), `icon`, `mono` (code), `kbd` (a shortcut), `toggle` (`on`, `off`, `flip`), `tone`
   (`orange` for a warning), `changed: false` (a Now row that is not new), `at`. Now rows are green by default.
-- **setting** (optional): `{ name, state, at }`, the setting card under the strip.
+- **setting** (optional): `{ name, state, at, toggle }`, the setting card under the strip; `toggle` (with `state`):
+  `on`, `off`, or `flip` (it turns on). A toggle that flips, or Before and Now toggles that differ, say a default
+  changed: only when the PR changes one (`prs digest check` looks in its diff). Otherwise show the state as it is.
 - The strip must fit 675 px: about 7 rows with heads (`prs digest check` measures it).
 - **visual**: `{ "demo": "c5" }` or `{ "scene": { "name": "...", "params": { ... } } }` (times in params too).
 - **focus** (optional; not on a card): the one part the arrow points to: a scene's part, or a demo's mark.
