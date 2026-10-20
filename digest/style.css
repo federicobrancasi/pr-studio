@@ -217,7 +217,7 @@
 /* editor: a file open, text appearing at the cursor */
 .ed-code { position: absolute; left: 0; top: 18px; right: 0; display: flex; font-family: var(--mono); font-size: 24px; line-height: 40px; color: #d4d4d4; }
 .ed-gutter { width: 78px; flex: none; text-align: right; padding-right: 22px; color: #6e7681; }
-.ed-texts { flex: 1; min-width: 0; }
+.ed-texts { flex: 1; min-width: 0; padding-left: 14px; }
 .ed-line { white-space: pre; height: 40px; }
 .ed-ins { display: inline-block; }
 .ed-caret { display: inline-block; width: 2px; height: 30px; background: #aeafad; margin-left: 1px; vertical-align: -6px; }

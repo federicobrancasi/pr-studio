@@ -117,6 +117,7 @@ import i113 from '@fluentui/svg-icons/icons/fingerprint_24_regular.svg';
 import i114 from '@fluentui/svg-icons/icons/window_multiple_24_regular.svg';
 import i115 from '@fluentui/svg-icons/icons/notebook_24_regular.svg';
 import i116 from '@fluentui/svg-icons/icons/tasks_app_24_regular.svg';
+import i117 from '@fluentui/svg-icons/icons/briefcase_24_regular.svg';
 
 export const ICONS = {
 	lock: i0,
@@ -236,6 +237,7 @@ export const ICONS = {
 	windows: i114,
 	notebook: i115,
 	tasks: i116,
+	briefcase: i117,
 };
 
 export const ICON_NAMES = Object.keys(ICONS);

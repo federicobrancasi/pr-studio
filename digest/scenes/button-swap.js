@@ -31,7 +31,8 @@ export default {
 		page.innerHTML = `<div class="bs-layer before">${content(p.before)}</div><div class="bs-layer after">${content(p.after)}</div><div class="bs-line"><div class="bs-handle">${esc(p.label ?? 'Now')}</div></div>`;
 		fillIcons(page);
 		const before = page.querySelector('.before'), after = page.querySelector('.after'), line = page.querySelector('.bs-line');
-		const width = page.offsetWidth;
+		const handle = page.querySelector('.bs-handle');
+		const width = page.offsetWidth, half = handle.offsetWidth / 2;
 		return {
 			rects: {
 				before: sceneRect(before.querySelector('.bs-btn'), host, ctx.view),
@@ -43,6 +44,9 @@ export default {
 				before.style.clipPath = `inset(0 0 0 ${edge.toFixed(1)}px)`;
 				line.style.opacity = p.swapAt === undefined ? '0' : (clamp((t - p.swapAt + 0.15) / 0.15) * (1 - clamp((t - p.swapAt - 0.9) / 0.3))).toFixed(3);
 				line.style.transform = `translateX(${(edge - 2).toFixed(1)}px)`;
+				// The handle rides the line but stays inside the page: at the edges it slides along, never cut in half.
+				const shift = Math.max(0, half - edge) - Math.max(0, edge + half - width + 4);
+				handle.style.transform = `translateX(calc(-50% + ${shift.toFixed(1)}px))`;
 			},
 		};
 	},
