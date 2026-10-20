@@ -1,7 +1,7 @@
 // The changelog digest: its times (phrases of the narration, demo marks, steps) and the strip's height.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { changesADefault, valueChanges, fitZoom, focusShows, iconsOf, inProof, loadSceneDocs, orderStrip, planFocus, proofCorpus, resolveTime, resolveTimes, steadyFrom, stripHeight } from '../cli/lib/digest.mjs';
+import { changesADefault, unshownParts, valueChanges, fitZoom, focusShows, iconsOf, inProof, loadSceneDocs, orderStrip, planFocus, proofCorpus, resolveTime, resolveTimes, steadyFrom, stripHeight } from '../cli/lib/digest.mjs';
 
 // A chapter that starts 10 s into the video: "Five. VS Code links can now add a plugin marketplace."
 const words = ['Five.', 'VS', 'Code', 'links', 'can', 'now', 'add', 'a', 'plugin', 'marketplace.']
@@ -174,6 +174,14 @@ test('a toggle flips, and a drawn setting changes its value, only when the PR ch
 		// merely starts with "default", a removed or unchanged line doesn't.
 		defaults: [true, true, true, false, false, false, false, false],
 	});
+});
+
+test('a demo chapter\'s Now rows say what the recording shows, not words of the PR it doesn\'t show', () => {
+	const corpus = proofCorpus('"When enabled, Auto is presented as Fusion, optimizing for Lite, Balance, or Max."');
+	const demo = { marks: { row: { texts: ['Chat › Copilot › Ensemble: Enabled When enabled, Copilot Agent Host sessions present Auto as Fusion, which optimizes for Standard, High, or Max.'] } } };
+	const ch = { now: { rows: [{ id: 'new', text: 'Fusion' }, { id: 'tiers', text: 'Lite · Balance · Max', changed: false }, { id: 'on', text: 'On in Insiders' }] } };
+	// "On in Insiders" isn't the PR's text (a summary): only the PR's words are held to the recording.
+	assert.deepStrictEqual(unshownParts(ch, demo, corpus), ['Lite', 'Balance']);
 });
 
 test('the strip comes in top to bottom: Before ahead of Now, even when the narration names it after', () => {

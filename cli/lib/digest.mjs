@@ -618,6 +618,17 @@ function prCorpus(prSlug, cache) {
 	return cache.get(prSlug);
 }
 
+/**
+ * The parts of a demo chapter's Now rows (split at · and ,) that are the PR's text but that no mark of the recording
+ * shows: the strip would say one thing and the recording another (a build newer than the PR can word it differently).
+ */
+export function unshownParts(ch, demo, corpus) {
+	const seen = proofText(Object.values(demo.marks ?? {}).flatMap(m => [...(m.texts ?? []), m.text ?? '']).join('\n'));
+	return (ch.now?.rows ?? []).flatMap(r => [r.text, r.sub]).filter(Boolean)
+		.flatMap(t => String(t).split(/\s*[·,]\s*/))
+		.filter(part => proofText(part).length >= 3 && inProof(corpus, part) && !seen.includes(proofText(part)));
+}
+
 /** A PR's diff, or null when it wasn't downloaded. */
 function prDiff(prSlug) {
 	const file = path.join(videoDir(prSlug), 'pr.diff');
@@ -799,6 +810,11 @@ export async function checkDigest(slug) {
 					} else if (!shown.includes(proofText(proof))) {
 						problems.push(`${id}: the focus "${ch.focus}" never shows "${proof}" on screen: point the focus at the UI that says it (or this demo doesn't show the change: use a scene or a card)`);
 					}
+				}
+				// The strip says what the recording shows (the build recorded can word the change differently than the PR).
+				const unshown = corpus ? unshownParts(ch, demo, corpus) : [];
+				if (unshown.length) {
+					problems.push(`${id}: the Now rows say ${unshown.map(x => `"${x}"`).join(', ')}, which the recording never shows (the build recorded may word it differently): write what the recording shows, or leave it out`);
 				}
 			}
 		} else if (!v.scene) {

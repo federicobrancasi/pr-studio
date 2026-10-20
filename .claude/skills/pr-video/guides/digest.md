@@ -226,6 +226,8 @@ Open **each one at full size** (the contact sheet is too small to judge), and fi
 - Is the UI on the right the one the PR changes (a recording of it, a drawing of it, or a card), not another UI?
 - Does the ring sit on the thing its row names? Is the text readable, nothing cut off or overlapping?
 - Every string on screen is in `facts.md`; every before → after is shown by the diff.
+- Next to a recording, the strip says what the recording shows: the build recorded can word the change differently
+  than the PR (then write its words, or leave them out).
 - The headline, the strip and the narration say the same thing.
 - 55-65 s in all (`prs digest check` prints the length of each chapter).
 
