@@ -8,7 +8,7 @@ export const REPO_COMMANDS = new Set(['changelog', 'digest', 'demo', 'build', 'p
 
 export const REPO_HELP = `  prs changelog [--run id | file]    the videos for the top 5 of today's #changelog (report from vscode-engineering)
   prs digest new [--run id | --file report.md] [--build auto|main|insiders]   one video for the top 5 of a #changelog
-                                     report (guides/digest.md); builds VS Code from main when Insiders lacks the picks
+                                     report (the changelog-video skill); builds VS Code from main when Insiders lacks the picks
   prs digest check | stills [--at t,..] | review | render | scenes [slug]   check, look at, review (a sheet per
                                      chapter, and what to check), render it; the drawn scenes
   prs demo <id> [--slug s]           record demos/<id>.mjs in VS Code (the project's build, or PRS_VSCODE; signed in on

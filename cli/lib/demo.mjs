@@ -1012,6 +1012,10 @@ export async function demo(slug, id, { signedIn = process.platform === 'darwin' 
 			w.setContentSize(s.width, s.height);
 		}, SIZE);
 		await sleep(3000);
+		// Signed out, the Agents window is a sign-in dialog over everything: nothing in it can be recorded.
+		if (await agents.getByText('Sign in to use Agents', { exact: true }).isVisible().catch(() => false)) {
+			throw new Error('The Agents window needs a sign-in, and this build runs signed out here: draw this chapter (a scene) instead of recording it');
+		}
 		hookTyping(agents);
 		win.page = agents;
 		return { ...helpers(agents, app), scheme, workspace: vscode.workspace };
@@ -1094,8 +1098,9 @@ export async function demo(slug, id, { signedIn = process.platform === 'darwin' 
 		tracker = null;
 		const frames = await recording.stop();
 		recording = null;
-		if (frames.length < 2) {
-			throw new Error('Nothing was recorded (no repaint)');
+		// A window that never repaints sends one frame: it lasts the whole recording.
+		if (!frames.length) {
+			throw new Error('Nothing was recorded (the window never painted)');
 		}
 		const first = frames[0].t;
 		const duration = Date.now() / 1000 - first;

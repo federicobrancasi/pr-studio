@@ -1319,7 +1319,7 @@ export async function digestCommand(args) {
 			for (const [i, p] of picks.entries()) {
 				console.log(`  c${i + 1} #${p.number} ${p.title}${p.inBuild === false ? '  (not in the demo build)' : ''}`);
 			}
-			console.log(`  read videos/${slug}/brief.md; write storyboard.json and digest.json (guides/digest.md)`);
+			console.log(`  read videos/${slug}/brief.md; write storyboard.json and digest.json (.claude/skills/changelog-video/SKILL.md)`);
 			return 0;
 		}
 		case 'check': {
