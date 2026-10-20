@@ -133,7 +133,8 @@ On a sheet, a frame is wrong when:
 - the UI on the right is not the one the PR changes (a recording of another UI, a drawing of a UI that doesn't
   exist);
 - a ring is not on what its row names, or is on something not there yet, or the arrow comes before its part shows;
-- what is said then is not what is on screen;
+- what is said then is not what is on screen: a label, option or value the narration names that doesn't show, or
+  shows in other words (a recorded build can word it differently than the PR);
 - next to a recording, the strip says something the recording doesn't show;
 - something is cut off, overlapping or unreadable.
 

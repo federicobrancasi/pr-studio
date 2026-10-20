@@ -1224,7 +1224,7 @@ export async function reviewDigest(slug, { workers = 3 } = {}) {
 export const REVIEW_CHECKLIST = [
 	'The UI on the right is the one the PR changes: a recording of it, a drawing of it, or a card when there is nothing to show; never another UI.',
 	'Each ring sits on exactly what its row names, while that is on screen: no ring on empty space, on another part, or on something not there yet.',
-	'What is said at each moment is what is on screen then.',
+	'What is said at each moment is what is on screen then: every label, option or value the narration names shows, in the build\'s words (a recorded build can word it differently than the PR: then the narration says what it shows, or leaves it out).',
 	'Next to a recording, the strip says what the recording shows (the build recorded can word it differently than the PR).',
 	'Nothing is cut off or overlapping; the text is readable; the headline, the strip and the narration say the same thing.',
 ];
