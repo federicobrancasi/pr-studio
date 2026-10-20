@@ -29,6 +29,8 @@ For each chapter, in this order:
 2. **Draw it** (a scene) when it can't be recorded here: it needs a sign-in the build doesn't have, another OS, an
    enterprise policy, the network, Stable.
 3. **A card** only when there is no UI to show (telemetry, a default applied behind the scenes, an internal change).
+   A change that has UI is drawn, never a card, even when no scene is exactly that UI: take the closest one (a
+   control whose label changes is a `button-swap`, a dropdown a `picker`, a row's buttons `list-actions`).
 
 Try a recording before you give up on it: when a locator doesn't match, `prs demo inspect <id>` shows the text on
 screen. When the same recording fails twice the same way, draw the chapter and write why in `notes.md`.
