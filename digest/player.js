@@ -251,12 +251,11 @@ export default function createPlayer(root, DATA) {
 	}
 
 	/**
-	 * Where the focus is on the page at t, or null when it isn't on screen then. A demo's mark: its box as recorded in the
+	 * Where a part is on the page at t, or null when it isn't on screen then. A demo's mark: its box as recorded in the
 	 * frame shown at t, through the camera. A scene's part: measured now (fonts, animations), while it is drawn and
 	 * opaque.
 	 */
-	function focusRect(seg, plan, t, box) {
-		const name = seg.focus.name;
+	function focusRect(seg, plan, name, t, box) {
 		if (seg.clip) {
 			const k = Math.max(0, Math.min(seg.clip.map.length - 1, Math.floor((t - seg.start) * seg.clip.fps + 1e-6)));
 			const at = trackBoxAt(seg.targets[name], (seg.clip.map[k] - 1) / seg.clip.clipFps);
@@ -275,24 +274,25 @@ export default function createPlayer(root, DATA) {
 		return r.el ? liveRect(r.el) : r;
 	}
 
-	/** The chapter's one arrow: from its row to the focus, with a ring around it, while both are there. */
+	/** The chapter's arrows, one at a time: each from its row to its part, with a ring around it, while both are there. */
 	function drawFocus(seg, plan, t, box) {
-		const f = seg.focus;
-		if (!f || t < f.from || t >= f.until) {
-			return;
+		for (const f of seg.focus ?? []) {
+			if (t < f.from || t >= f.until) {
+				continue;
+			}
+			const row = plan.strip.rows[f.row];
+			const raw = row ? focusRect(seg, plan, f.name, t, box) : null;
+			if (!raw) {
+				continue;
+			}
+			const color = TONE[f.tone] ?? TONE.green;
+			const ring = inflate(raw, 6);
+			const g = svgEl(svg, 'g', { opacity: clamp((f.until - t) / 0.25).toFixed(3) });
+			drawRing(g, ring, color, decel(clamp((t - f.from - 0.2) / 0.4)));
+			const pts = route({}, { x: COL.x + COL.w + 2, y: row.cy }, ring);
+			prim.connector(g, pts, { color: '#fff', width: 7.5, radius: 14 }).render(t, f.from, 0.5);
+			prim.connector(g, pts, { color, width: 3, radius: 14 }).render(t, f.from, 0.5);
 		}
-		const row = plan.strip.rows[f.row];
-		const raw = row ? focusRect(seg, plan, t, box) : null;
-		if (!raw) {
-			return;
-		}
-		const color = TONE.green;
-		const ring = inflate(raw, 6);
-		const g = svgEl(svg, 'g', { opacity: clamp((f.until - t) / 0.25).toFixed(3) });
-		drawRing(g, ring, color, decel(clamp((t - f.from - 0.2) / 0.4)));
-		const pts = route({}, { x: COL.x + COL.w + 2, y: row.cy }, ring);
-		prim.connector(g, pts, { color: '#fff', width: 7.5, radius: 14 }).render(t, f.from, 0.5);
-		prim.connector(g, pts, { color, width: 3, radius: 14 }).render(t, f.from, 0.5);
 	}
 
 	let current = null, plan = null;

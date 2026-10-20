@@ -96,11 +96,11 @@ test('a drawn UI must be the PR\'s, and its one arrow goes up only once its row 
 		noFocus: plan(spec(sessions, undefined)),
 	}, {
 		proofs: [[true], [false]],
-		tooltip: { name: 'tooltip', row: 'new', from: 12.25, until: 14 },
-		child: { name: 'child', row: 'new', from: 14.25, until: 20 },
+		tooltip: [{ name: 'tooltip', row: 'new', from: 12.25, until: 14, tone: 'green' }],
+		child: [{ name: 'child', row: 'new', from: 14.25, until: 20, tone: 'green' }],
 		ringsNothing: true,
 		card: true,
-		noFocus: { focus: null, focusProblem: null, camera: [] },
+		noFocus: { focus: [], focusProblem: null, camera: [] },
 	});
 });
 
@@ -121,9 +121,33 @@ test('a recorded focus gets its arrow only while it shows the proof, once still,
 		steady: [0.6, 5.2],
 		// Shown at 25 s in the video, steady at 25.2; the camera zooms in once it is steady (25.1-26.0); the arrow waits
 		// until 26.05, and holds to the chapter's end (the window lasts to the recording's end).
-		withProof: { focus: { name: 'row', row: 'on', from: 26.05, until: 32 }, focusProblem: null, camera: [{ at: 25.1, dur: 0.9, z: 1.5, fx: 250, fy: 240 }] },
+		withProof: { focus: [{ name: 'row', row: 'on', from: 26.05, until: 32, tone: 'green' }], focusProblem: null, camera: [{ at: 25.1, dur: 0.9, z: 1.5, fx: 250, fy: 240 }] },
 		typedAwayProof: true,
 		ringsMostOfTheWindow: true,
+	});
+});
+
+test('up to three arrows, one at a time: each from its row when its phrase is spoken, in its row\'s color', async () => {
+	const kit = await loadSceneDocs();
+	// A dialog drawn 10-20 s: its title, its primary button, its highlighted line.
+	const params = { title: 'Install Plugin?', detail: 'From github/awesome. **Plugins can run code on your machine.**', buttons: [{ label: 'Cancel' }, { label: 'Install', primary: true }], showAt: 10 };
+	const rows = [{ id: 'ask', text: 'Asks first' }, { id: 'go', style: 'button', text: 'Install' }, { id: 'warn', tone: 'orange', text: 'Plugins can run code on your machine.' }];
+	const spec = focus => ({ now: { at: 11, rows }, scene: { name: 'dialog', params }, focus });
+	const plan = s => planFocus('c5', s, { start: 10, end: 20, targets: {}, kit });
+	assert.deepStrictEqual({
+		three: plan(spec([{ part: 'dialog', row: 'ask' }, { part: 'primary', row: 'go', at: 14 }, { part: 'highlight', row: 'warn', at: 16.5 }])).focus,
+		// The second arrow's phrase comes 0.5 s after the first: the first would last under 1 s.
+		tooClose: plan(spec([{ part: 'dialog', row: 'ask', at: 12 }, { part: 'primary', row: 'go', at: 12.5 }])).focusProblem !== null,
+		four: plan(spec(['dialog', 'title', 'primary', 'highlight'])).focusProblem !== null,
+	}, {
+		// The rows are in at 11.6, 11.72, 11.84 (+0.6 each); the dialog is drawn from 10 (+0.25 settle).
+		three: [
+			{ name: 'dialog', row: 'ask', from: 11.6, until: 13.95, tone: 'green' },
+			{ name: 'primary', row: 'go', from: 14, until: 16.45, tone: 'blue' },
+			{ name: 'highlight', row: 'warn', from: 16.5, until: 20, tone: 'orange' },
+		],
+		tooClose: true,
+		four: true,
 	});
 });
 
