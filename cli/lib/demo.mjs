@@ -9,11 +9,14 @@
 //   export default async function demo(ctx) { ... }   // recorded
 // ctx: page, run, palette, picker, pickerItem, setting, openUrl, terminal, chat.send/reply, moveTo, click, type,
 // press, sleep, scheme, workspace, openAgentsWindow (in setup: the recording is then of the Agents window), and in the
-// recorded part mark and step.
-// mark(name, locator, { text }) logs that element's box and the times it is shown (with { text }: only while that text
-// shows in it):
+// recorded part mark, step, cue and begin.
+// mark(name, locator, { text, tight }) logs that element's box and the times it is shown (with { text }: only while
+// that text shows in it; with tight too, the box is the text's own: a sentence of a dialog):
 // marks are followed for the whole recording, so give each one a locator that matches only its UI (filter by its
 // text); step(label) logs a moment worth a still.
+// cue(phrase, { nth, offset }) waits until the chapter's narration says the phrase (record after prs voice): the
+// recording keeps the narration's pace and plays as recorded. The narration starts where the recording starts, or at
+// begin(); cue.end() waits until it ends, and the clip ends there (or where the script does).
 //
 // The build: PRS_VSCODE (the executable: code-insiders on Linux; or VS Code built from source by prs build), or on
 // macOS /Applications/Visual Studio Code - Insiders.app. Signed out on Linux (CI: no keychain); on macOS always signed
@@ -701,7 +704,7 @@ async function screencast(page, dir) {
 }
 
 /** The box of the first shown element of a locator's matches (or of a text inside it), in the page; null if none. */
-function measure(elements, text) {
+function measure(elements, { text, tight }) {
 	// On top: at least 2 of 3 points across its middle hit it (or something inside it): not covered by an overlay, not
 	// a row of a list that isn't the one on screen. Elements that let clicks through hit their parent: that counts.
 	const onTop = (el, r) => {
@@ -726,7 +729,8 @@ function measure(elements, text) {
 		let r = box;
 		if (text) {
 			// The words themselves (a sentence of a paragraph): a range over the text nodes that hold them. The mark counts
-			// only while they show (and aren't covered); its box stays the element's: the ring goes around the whole UI.
+			// only while they show (and aren't covered); its box stays the element's (the ring goes around the whole UI), or
+			// with tight, is the words' own.
 			const nodes = [];
 			const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
 			let all = '';
@@ -752,7 +756,8 @@ function measure(elements, text) {
 		if (inWindow && onTop(el, r)) {
 			// What it says: a demo proves it shows the PR's UI with it.
 			const said = (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 4000);
-			return { x: box.x, y: box.y, width: box.width, height: box.height, text: said };
+			const b = text && tight ? r : box;
+			return { x: b.x, y: b.y, width: b.width, height: b.height, text: said };
 		}
 	}
 	return null;
@@ -768,7 +773,7 @@ function markTracker(page) {
 				// evaluateAll does not wait for a match: a mark that is not on screen costs nothing. Its time is when it was
 				// measured (the middle of the call), so it matches the frame on screen then.
 				const before = Date.now();
-				const box = await m.locator.evaluateAll(measure, m.text).catch(() => null);
+				const box = await m.locator.evaluateAll(measure, { text: m.text, tight: m.tight }).catch(() => null);
 				m.samples.push({ t: (before + Date.now()) / 2000, box });
 			}
 			await sleep(100);
@@ -776,11 +781,14 @@ function markTracker(page) {
 	};
 	const loop = sample();
 	return {
-		mark(name, locator, { text = null } = {}) {
+		mark(name, locator, { text = null, tight = false } = {}) {
 			if (!/^[a-zA-Z][\w.-]*$/.test(name)) {
 				throw new Error(`mark(): "${name}" is not a valid name (letters, digits, ., - and _)`);
 			}
-			marks.set(name, { locator, text, samples: marks.get(name)?.samples ?? [] });
+			if (tight && !text) {
+				throw new Error(`mark(): "${name}" is tight around its text: give { text }`);
+			}
+			marks.set(name, { locator, text, tight, samples: marks.get(name)?.samples ?? [] });
 		},
 		async stop() {
 			running = false;
@@ -1013,8 +1021,14 @@ export async function demo(slug, id, { signedIn = process.platform === 'darwin' 
 			throw error;
 		}
 		if (typeof mod.setup === 'function') {
-			await mod.setup({ ...ctxFor(), mark: () => { }, step: () => { } });
+			const notYet = () => {
+				throw new Error('cue() and begin() pace the recording: use them in the demo, not in setup()');
+			};
+			await mod.setup({ ...ctxFor(), mark: () => { }, step: () => { }, begin: notYet, cue: Object.assign(notYet, { end: notYet }) });
 		}
+		// The narration of the chapter that shows this demo: cue(phrase) waits until the video says it.
+		const { demoNarration, cueTime } = await import('./digest.mjs');
+		const narration = demoNarration(slug, id);
 		const rec = win.page;
 		win.recording = true;
 		await showCursor(rec);
@@ -1024,11 +1038,46 @@ export async function demo(slug, id, { signedIn = process.platform === 'darwin' 
 		tracker = markTracker(rec);
 		await sleep(400);
 		const start = recording.frames[0]?.t ?? Date.now() / 1000;
+		const now = () => Date.now() / 1000 - start;
+		const sync = { at: null, end: null, cues: [] };
+		const waitUntil = async (want, what) => {
+			if (!narration) {
+				throw new Error(`${what} waits for the narration of the chapter that shows demo ${id}: give that chapter "visual": { "demo": "${id}" } in digest.json, run prs voice, then record`);
+			}
+			sync.at ??= 0;
+			const wait = sync.at + want - now();
+			if (wait > 0) {
+				await sleep(wait * 1000);
+			}
+			const late = now() - sync.at - want;
+			if (late > 0.3) {
+				log(`  ${what} came ${late.toFixed(1)} s late: the steps before it took longer than the narration allows`);
+			}
+			return sync.at + want;
+		};
+		const cue = async (phrase, { nth = 0, offset = 0 } = {}) => {
+			const t = narration ? cueTime(narration.words, phrase, nth, ` (chapter ${narration.chapter})`) : 0;
+			const want = await waitUntil(t + offset, `cue "${phrase}"`);
+			sync.cues.push({ phrase: String(phrase), nth, t, want, at: now() });
+		};
+		// The clip ends here: what the script does after it (closing a dialog) isn't shown.
+		cue.end = async ({ offset = 0 } = {}) => {
+			await waitUntil((narration?.end ?? 0) + (narration?.tail ?? 0) + offset, 'cue.end()');
+			sync.end = now();
+		};
+		const begin = () => {
+			if (sync.at !== null) {
+				throw new Error('begin() comes once, before the first cue');
+			}
+			sync.at = now();
+		};
 		await mod.default({
 			...ctxFor(),
 			mark: (name, locator, options) => tracker.mark(name, locator, options),
 			step: label => steps.push({ label: String(label), t: +(Date.now() / 1000 - start).toFixed(2) }),
+			begin, cue,
 		});
+		sync.end ??= now();
 		await sleep(600);
 		fs.writeFileSync(path.join(out, 'screen.txt'), await screenText(rec).catch(() => ''));
 		const marks = await tracker.stop();
@@ -1049,10 +1098,17 @@ export async function demo(slug, id, { signedIn = process.platform === 'darwin' 
 		const count = fs.readdirSync(path.join(out, 'frames')).filter(f => f.endsWith('.jpg')).length;
 		execFileSync(ffmpeg, ['-v', 'error', '-y', '-framerate', String(FPS), '-i', path.join(out, 'frames', '%05d.jpg'), '-vf', 'scale=1280:720', '-c:v', 'libx264', '-crf', '20', '-pix_fmt', 'yuv420p', path.join(out, 'clip.mp4')]);
 		fs.rmSync(raw, { recursive: true, force: true });
+		const shift = first - start, at2 = t => Math.max(0, +(t - shift).toFixed(2));
 		const info = {
 			id, fps: FPS, count, duration: +(count / FPS).toFixed(2), size: [SIZE.width, SIZE.height], scale: 2,
 			build, signedIn: vscode.signedIn, fonts, recorded: new Date().toISOString(),
 			steps: steps.map(s => ({ ...s, t: Math.max(0, +(s.t - (first - start)).toFixed(2)) })),
+			...(sync.at === null ? {} : {
+				sync: {
+					chapter: narration.chapter, at: at2(sync.at), end: at2(sync.end),
+					cues: sync.cues.map(c => ({ phrase: c.phrase, nth: c.nth, t: c.t, want: at2(c.want), at: at2(c.at) })),
+				},
+			}),
 			viewport, typed: typed.filter(x => x.length > 1),
 			marks: summarizeMarks(marks, first, count / FPS, viewport),
 		};
@@ -1064,6 +1120,9 @@ export async function demo(slug, id, { signedIn = process.platform === 'darwin' 
 		}
 		for (const s of info.steps) {
 			log(`  step ${s.t} s: ${s.label}`);
+		}
+		if (info.sync) {
+			log(`  in sync with ${info.sync.chapter}'s narration from ${info.sync.at} s to ${info.sync.end} s: ${info.sync.cues.map(c => `"${c.phrase}" at ${c.at} s${c.at - c.want > 0.3 ? ` (${(c.at - c.want).toFixed(1)} s late)` : ''}`).join(', ') || 'no cues'}`);
 		}
 		log(`look at ${path.relative(process.cwd(), path.join(out, 'contact.png'))} (and clip.mp4); the text on screen at the end: ${path.relative(process.cwd(), path.join(out, 'screen.txt'))}`);
 		return info;

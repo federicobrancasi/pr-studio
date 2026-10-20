@@ -36,6 +36,33 @@ const TIME_KEY = /^(at|from|until)$|At$/;
 const norm = s => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
 const r3 = x => Math.round(x * 1000) / 1000;
 
+/** The video's timing: MAI-Voice-2 reads a little slower than Kokoro, so it plays a touch faster (1.08, as on Oct 19). */
+function digestTiming(timeline, digest) {
+	return { ...TIMING, ...(timeline.voice?.provider === 'mai' ? { tempo: 1.08 } : {}), ...(digest.timing ?? {}) };
+}
+
+/**
+ * The narration of the chapter that shows a demo, as the video plays it (seconds from when the chapter's narration
+ * starts): what a demo's cue() waits for. Null before prs voice, or when no chapter shows the demo.
+ */
+export function demoNarration(slug, demoId) {
+	const dfile = path.join(videoDir(slug), 'digest.json'), tfile = path.join(buildDir(slug), 'timeline.json');
+	if (!fs.existsSync(dfile) || !fs.existsSync(tfile)) {
+		return null;
+	}
+	const digest = readJson(dfile), timeline = readJson(tfile);
+	const chapter = Object.keys(digest.chapters ?? {}).find(id => digest.chapters[id].visual?.demo === demoId);
+	const beat = chapter && timeline.beats.find(b => b.id === chapter);
+	if (!beat) {
+		return null;
+	}
+	const timing = digestTiming(timeline, digest), tempo = timing.tempo || 1;
+	return {
+		chapter, tail: timing.tail, end: r3((beat.end - beat.start) / tempo),
+		words: beat.words.map(w => ({ display: w.display, a: r3((w.a - beat.start) / tempo), b: r3((w.b - beat.start) / tempo) })),
+	};
+}
+
 /** The latest digest project (videos/changelog-<date>), or the one named. */
 export function digestSlug(arg) {
 	if (arg) {
@@ -158,7 +185,7 @@ function brief(report, picks, build) {
 // The timeline: segments from the narration, clip timing, time specs resolved to seconds of the video.
 
 /** Absolute time of a phrase in a segment's words. */
-function cueTime(words, phrase, nth = 0, where = '') {
+export function cueTime(words, phrase, nth = 0, where = '') {
 	const want = String(phrase).split(/\s+/).map(norm).filter(Boolean);
 	if (!want.length) {
 		throw new Error(`Empty cue${where}`);
@@ -342,9 +369,12 @@ export function focusEntries(spec) {
 		: { part: e?.part, row: e?.row, at: e?.at });
 }
 
-/** An arrow's color: its row's tone (orange for a warning, blue for a button, green for a change). */
+/** An arrow's color: its row's tone (orange for a warning, blue for a button, grey from a Before row, else green). */
 export function rowTone(spec, rowId) {
-	const row = [...(spec.now?.rows ?? []), ...(spec.before?.rows ?? [])].find(r => r.id === rowId);
+	if ((spec.before?.rows ?? []).some(r => r.id === rowId)) {
+		return 'neutral';
+	}
+	const row = (spec.now?.rows ?? []).find(r => r.id === rowId);
 	if (!row) {
 		return 'green';
 	}
@@ -405,7 +435,7 @@ function targetWindows(id, name, spec, { start, end, kit, demo, recording }, pro
  * A chapter's arrows, computed (up to three, one at a time): each from its row (once the row is in, and once its
  * phrase is spoken: `at`) to its target, while the target is on screen and steady, until the next one starts or its
  * target leaves. Each lasts at least 1 s, or there are none (focusProblem says why). For a demo, the camera moves in
- * on the parts pointed at when the first shows (as close as they all fit, at most 1.5x).
+ * on the parts pointed at when the first shows (as close as they fit, at most 1.5x), and on to a later one out of view.
  */
 export function planFocus(id, spec, ctx) {
 	const { start, end, demo, recording } = ctx;
@@ -439,28 +469,48 @@ export function planFocus(id, spec, ctx) {
 		}
 		plans.push({ name: e.part, row, rowIn: times[row], at: typeof e.at === 'number' ? e.at : null, windows: target.windows, tone: rowTone(spec, row) });
 	}
-	// The camera (demos) frames every mark pointed at, as it is once steady (as close as they all fit, at most 1.5x); it
-	// moves in when the first arrow's target shows, and the arrows wait for it to settle.
-	let zoom = null;
-	if (demo) {
-		const boxes = plans.map(p => trackBoxAt(recording.marks[p.name], p.windows[0][2]) ?? recording.marks[p.name].rect);
-		const x0 = Math.min(...boxes.map(b => b[0])), y0 = Math.min(...boxes.map(b => b[1]));
-		const x1 = Math.max(...boxes.map(b => b[0] + b[2])), y1 = Math.max(...boxes.map(b => b[1] + b[3]));
+	// The camera (demos) frames the marks pointed at, as they are once steady: as close as the first ones fit together
+	// (at most 1.5x), when the first one shows. When a later one is out of that view, it moves to frame it with the one
+	// before (or the whole window), once the arrow before has had its second; the arrows wait for it to settle.
+	const boxes = demo ? plans.map(p => trackBoxAt(recording.marks[p.name], p.windows[0][2]) ?? recording.marks[p.name].rect) : [];
+	const framing = list => {
+		const x0 = Math.min(...list.map(b => b[0])), y0 = Math.min(...list.map(b => b[1]));
+		const x1 = Math.max(...list.map(b => b[0] + b[2])), y1 = Math.max(...list.map(b => b[1] + b[3]));
 		const z = Math.min(1.5, 0.85 * CLIP_W / (x1 - x0), 0.85 * CLIP_H / (y1 - y0));
-		if (z >= 1.1) {
-			zoom = { z: r3(z), fx: r3((x0 + x1) / 2), fy: r3((y0 + y1) / 2) };
+		return z >= 1.1 ? { z: r3(z), fx: r3((x0 + x1) / 2), fy: r3((y0 + y1) / 2) } : { z: 1, fx: CLIP_W / 2, fy: CLIP_H / 2 };
+	};
+	const inView = (b, v) => {
+		// A view at the window's edge shows what touches it: the margin is only on the sides inside the window.
+		const w = CLIP_W / v.z, h = CLIP_H / v.z;
+		const left = Math.min(Math.max(v.fx - w / 2, 0), CLIP_W - w), top = Math.min(Math.max(v.fy - h / 2, 0), CLIP_H - h);
+		const mx = 0.04 * w, my = 0.04 * h;
+		return b[0] >= (left > 0 ? left + mx : 0) && b[0] + b[2] <= (left + w < CLIP_W ? left + w - mx : CLIP_W)
+			&& b[1] >= (top > 0 ? top + my : 0) && b[1] + b[3] <= (top + h < CLIP_H ? top + h - my : CLIP_H);
+	};
+	const views = [];
+	if (demo) {
+		let first = 1;
+		while (first < boxes.length && framing(boxes.slice(0, first + 1)).z >= Math.max(1.1, 0.85 * framing(boxes.slice(0, first)).z)) {
+			first++;
+		}
+		const view0 = framing(boxes.slice(0, first));
+		for (let i = 0; i < boxes.length; i++) {
+			const view = i ? views[i - 1] : view0;
+			views.push(i < first || inView(boxes[i], view) ? view : framing([boxes[i - 1], boxes[i]]));
 		}
 	}
 	// One at a time, in order: each starts once its row is in, its phrase is spoken, its target is steady (0.25 s), the
-	// camera has settled, and the one before has had 1 s; it ends when the next starts, or when its target leaves.
+	// camera has settled, and the one before has had 1 s; it ends when the next starts (or the camera moves on), or
+	// when its target leaves.
 	const starts = [];
 	let settle = -Infinity;
 	for (const [i, p] of plans.entries()) {
+		const moves = demo && (i === 0 ? views[0].z > 1 : views[i] !== views[i - 1]);
 		let chosen = null;
 		for (const w of p.windows) {
 			let camAt = null, ready = settle;
-			if (i === 0 && zoom) {
-				camAt = r3(Math.max(start + 0.2, w[0] - 0.1));
+			if (moves) {
+				camAt = r3(i === 0 ? Math.max(start + 0.2, w[0] - 0.1) : Math.max(starts[i - 1].from + 1.05, Math.min(w[0] - 0.1, starts[i - 1].until)));
 				ready = camAt + 0.9 + 0.05;
 			}
 			const earliest = Math.max(p.rowIn, p.at ?? -Infinity, ready, i ? starts[i - 1].from + 1 : -Infinity);
@@ -474,11 +524,14 @@ export function planFocus(id, spec, ctx) {
 			const shown = p.windows.map(([a, b]) => `${fmt(a)}-${fmt(Math.min(b, end))} s`).join(', ');
 			return fail(i === 0 && plans.length === 1 && p.at === null
 				? `${id}: "${p.name}" is on screen (and steady) ${shown} into the chapter, but its row "${p.row}" is in only at ${fmt(p.rowIn)} s: the arrow would last under 1 s. Show it longer (or later, clip.start/end), or bring the row in earlier`
-				: `${id}: arrow ${i + 1} ("${p.row}" → "${p.name}") can start only at ${fmt(earliest)} s into the chapter (its row, its phrase${i ? ', the arrow before' : ''}), but "${p.name}" is on screen (and steady) ${shown}: it would last under 1 s. Show it longer, or bring its row or phrase earlier`);
+				: `${id}: arrow ${i + 1} ("${p.row}" → "${p.name}") can start only at ${fmt(earliest)} s into the chapter (its row, its phrase${i ? ', the arrow before' : ''}${moves && i ? ', the camera moving to it' : ''}), but "${p.name}" is on screen (and steady) ${shown}: it would last under 1 s. Show it longer, or bring its row or phrase earlier`);
 		}
 		if (chosen.camAt !== null) {
-			out.camera = [{ at: chosen.camAt, dur: 0.9, ...zoom }];
+			out.camera.push({ at: chosen.camAt, dur: 0.9, ...views[i] });
 			settle = chosen.ready;
+			if (i) {
+				starts[i - 1].until = Math.min(starts[i - 1].until, chosen.camAt - 0.05);
+			}
 		}
 		starts.push({ from: Math.max(chosen.earliest, chosen.w[0] + 0.25), until: Math.min(chosen.w[1], end) });
 	}
@@ -532,8 +585,7 @@ export async function planDigest(slug) {
 		throw new Error(`No narration yet: write storyboard.json, then run prs voice ${slug}`);
 	}
 	const timeline = readJson(tlFile);
-	// MAI-Voice-2 reads a little slower than Kokoro: it plays a touch faster (1.08, as in the Oct 19 video).
-	const timing = { ...TIMING, ...(timeline.voice?.provider === 'mai' ? { tempo: 1.08 } : {}), ...(digest.timing ?? {}) };
+	const timing = digestTiming(timeline, digest);
 	const tempo = timing.tempo || 1;
 	const picks = new Map(picksDoc.picks.map(p => [p.rank, p]));
 	const segments = [], words = [], audio = [];
@@ -564,15 +616,29 @@ export async function planDigest(slug) {
 				}
 				const demo = readJson(demoFile);
 				const clipSpec = ch.clip ?? {};
+				// A demo paced by cue() plays as recorded (1x): its narration starts where it called begin() (or where the
+				// recording starts), and the clip ends where its script ends. Recorded for other words, it's out of sync.
+				const sync = demo.sync?.chapter === beat.id && clipSpec.start === undefined ? demo.sync : null;
+				for (const c of sync?.cues ?? []) {
+					let t = null;
+					try {
+						t = cueTime(segWords, c.phrase, c.nth ?? 0) - at - lead;
+					} catch {
+						// No longer said: reported below.
+					}
+					if (t === null || Math.abs(t - c.t) > 0.15) {
+						throw new Error(`${beat.id}: the narration changed since demo ${visual.demo} was recorded ("${c.phrase}" ${t === null ? 'is no longer in it' : `moved from ${c.t.toFixed(2)} s to ${t.toFixed(2)} s`}): record it again (prs demo ${visual.demo})`);
+					}
+				}
 				// The part of the recording shown: clip.start to clip.end (seconds, or a moment such as when a mark shows).
 				// By default it starts 1.2 s before the focus first shows (with the proof): not on how the demo got there.
-				const cStart = clipSpec.start !== undefined ? clipMoment(clipSpec.start, demo, `${where}.clip.start`) : focusShows(demo, ch);
-				const cEnd = Math.min(clipSpec.end === undefined ? demo.duration : clipMoment(clipSpec.end, demo, `${where}.clip.end`), demo.count / CLIP_FPS);
+				const cStart = clipSpec.start !== undefined ? clipMoment(clipSpec.start, demo, `${where}.clip.start`) : sync ? sync.at : focusShows(demo, ch);
+				const cEnd = Math.min(clipSpec.end !== undefined ? clipMoment(clipSpec.end, demo, `${where}.clip.end`) : sync?.end ?? demo.duration, demo.count / CLIP_FPS);
 				if (cEnd - cStart < 1) {
 					throw new Error(`${beat.id}: the part of the recording shown is ${(cEnd - cStart).toFixed(1)} s (clip.start/end): at least 1 s`);
 				}
 				// One steady speed: the recording fits the narration (up to twice as fast), then holds its last frame.
-				const rate = Math.min(2, Math.max(1, (cEnd - cStart) / Math.max(1, narr + timing.tail - 0.2)));
+				const rate = sync ? 1 : Math.min(2, Math.max(1, (cEnd - cStart) / Math.max(1, narr + timing.tail - 0.2)));
 				const vEnd = lead + (cEnd - cStart) / rate;
 				dur = Math.max(lead + narr + timing.tail, vEnd + timing.clipHold);
 				const clipAt = v => v <= lead ? cStart : Math.min(cEnd, cStart + (v - lead) * rate);
@@ -915,6 +981,12 @@ export async function checkDigest(slug) {
 				const unshown = corpus ? unshownParts(ch, demo, corpus) : [];
 				if (unshown.length) {
 					problems.push(`${id}: the Now rows say ${unshown.map(x => `"${x}"`).join(', ')}, which the recording never shows (the build recorded may word it differently): write what the recording shows, or leave it out`);
+				}
+				// The recording keeps the narration's pace: a cue that came late shows what the narration says after it says it.
+				for (const c of demo.sync?.cues ?? []) {
+					if (c.at - c.want > 0.8) {
+						problems.push(`${id}: in demo ${v.demo}, cue "${c.phrase}" came ${(c.at - c.want).toFixed(1)} s late (the steps before it took longer than the narration allows): start them at an earlier cue, or cue a later phrase`);
+					}
 				}
 			}
 		} else if (!v.scene) {

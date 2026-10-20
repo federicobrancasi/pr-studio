@@ -151,6 +151,34 @@ test('up to three arrows, one at a time: each from its row when its phrase is sp
 	});
 });
 
+test('the camera moves on to a part out of its view, once the arrow before has had its second; a Before row\'s arrow is grey', () => {
+	// A slash menu at the bottom (0-4 s of the recording), then the forked session at the top left (6 s to the end).
+	const steady = (rect, from, to) => Array.from({ length: Math.round((to - from) * 10) + 1 }, (_, k) => [from + k / 10, ...rect]);
+	const menu = { rect: [375, 641, 572, 20], visible: [[0, 4]], texts: [''], track: steady([375, 641, 572, 20], 0, 4) };
+	const forked = { rect: [4, 212, 272, 56], visible: [[6, 9]], texts: [''], track: steady([4, 212, 272, 56], 6, 9) };
+	const recording = { toVideo: c => 20 + c, cEnd: 9, marks: { menu, forked } };
+	const spec = { before: { at: 20.1, rows: [{ id: 'old', text: '/fork' }] }, now: { at: 20.3, rows: [{ id: 'title', text: '/fork <title>' }] }, focus: [{ part: 'menu', row: 'old' }, { part: 'forked', row: 'title', at: 26 }] };
+	const { focus, camera } = planFocus('c4', spec, { start: 20, end: 30, targets: {}, kit: {}, demo: {}, clip: {}, recording });
+	// A tooltip, then the row it adds at the window's left edge: one view shows both, to the edge.
+	const tooltip = { rect: [151.5, 186.5, 165.5, 25], visible: [[0, 4]], texts: [''], track: steady([151.5, 186.5, 165.5, 25], 0, 4) };
+	const nested = { rect: [4, 212, 272, 56], visible: [[4.2, 9]], texts: [''], track: steady([4, 212, 272, 56], 4.2, 9) };
+	const atTheEdge = planFocus('c2', { now: { at: 20.3, rows: [{ id: 'a', text: 'New Nested Session' }, { id: 'b', text: 'One click', at: 24 }] }, focus: [{ part: 'tooltip', row: 'a' }, { part: 'nested', row: 'b' }] }, { start: 20, end: 30, targets: {}, kit: {}, demo: {}, clip: {}, recording: { toVideo: c => 20 + c, cEnd: 9, marks: { tooltip, nested } } }).camera;
+	assert.deepStrictEqual({ focus, camera, atTheEdge }, {
+		// The menu's arrow waits for the camera (in on the menu at 20.2, settled at 21.15) and ends as it moves on, when the
+		// menu leaves (24); it then frames the menu's place and the forked session together, and that arrow waits for
+		// its phrase (26) and for the session to be still (26.45).
+		focus: [
+			{ name: 'menu', row: 'old', from: 21.15, until: 23.95, tone: 'neutral' },
+			{ name: 'forked', row: 'title', from: 26.45, until: 30, tone: 'green' },
+		],
+		camera: [
+			{ at: 20.2, dur: 0.9, z: 1.5, fx: 661, fy: 651 },
+			{ at: 24, dur: 0.9, z: 1.154, fx: 475.5, fy: 436.5 },
+		],
+		atTheEdge: [{ at: 20.2, dur: 0.9, z: 1.5, fx: 160.5, fy: 227.25 }],
+	});
+});
+
 test('every icon a chapter uses is found: in rows, heads and scene params', () => {
 	assert.deepStrictEqual(iconsOf({
 		before: { icon: 'history', rows: [{ id: 'a', icon: 'pin', text: 'Pin' }] },
