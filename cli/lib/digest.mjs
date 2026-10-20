@@ -290,6 +290,30 @@ const NUMBERS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven'];
 
 /** DATA for the page: segments with resolved chapter specs, clip timing, marks in video time; the audio plan. */
 /** When each strip row has fully come in (seconds of the video), as the player shows it. */
+/**
+ * The strip comes in top to bottom: Before (its head, then its rows), its arrow, Now (its head, then its rows), then the
+ * setting card. When the narration names the old state after the new one ("now X, instead of Y"), Before comes in just
+ * ahead of Now, not after it; Now's rows and the setting come in after Now's head and in order.
+ */
+export function orderStrip(spec) {
+	const n = spec.now, b = spec.before;
+	let last = n.at;
+	n.rows.forEach((r, i) => {
+		last = r.at = r.at === undefined ? Math.max(last, n.at + 0.12 * i) : Math.max(r.at, last);
+	});
+	if (spec.setting?.at !== undefined) {
+		spec.setting.at = Math.max(spec.setting.at, last + 0.2);
+	}
+	if (b?.rows?.length && b.at !== undefined) {
+		b.at = Math.min(b.at, n.at - 0.6 - 0.12 * (b.rows.length - 1));
+		let prev = b.at;
+		b.rows.forEach((r, i) => {
+			prev = r.at = Math.min(n.at - 0.45, r.at === undefined ? b.at + 0.15 + 0.12 * i : Math.max(r.at, prev));
+		});
+	}
+	return spec;
+}
+
 export function rowTimes(spec) {
 	const out = {};
 	(spec.before?.rows ?? []).forEach((r, i) => {
@@ -507,6 +531,7 @@ export async function planDigest(slug) {
 			if (!spec.now?.rows?.length || spec.now.at === undefined) {
 				throw new Error(`${beat.id}: "now" needs "at" (the phrase that states the change) and rows`);
 			}
+			orderStrip(spec);
 			Object.assign(seg, planFocus(beat.id, spec, { start: at, end: at + dur, targets, kit, demo: visual.demo ? targets : null, clip: seg.clip, recording }));
 			const changed = spec.now.rows.filter(r => r.changed !== false && r.tone !== 'orange');
 			spec.recap = spec.recap ?? { before: spec.before?.rows?.[0]?.text ?? null, now: (changed.length ? changed : spec.now.rows).map(r => r.text).join(' · '), mono: (changed[0] ?? spec.now.rows[0]).mono ?? false };
@@ -593,6 +618,20 @@ function prCorpus(prSlug, cache) {
 	return cache.get(prSlug);
 }
 
+/** A PR's diff, or null when it wasn't downloaded. */
+function prDiff(prSlug) {
+	const file = path.join(videoDir(prSlug), 'pr.diff');
+	return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
+}
+
+/**
+ * Whether a diff adds or changes a setting's default: an added `default: <value>` (or `"default": <value>`) property,
+ * not a switch's `default:` case.
+ */
+export function changesADefault(diff) {
+	return diff.split('\n').some(line => /^\+(?!\+\+)\s*["']?default["']?\s*:\s*(?!return\b|break\b|throw\b|continue\b)[^\s;{][^;{]*$/.test(line));
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // prs digest check
 
@@ -673,6 +712,11 @@ export async function checkDigest(slug) {
 					} else if (!isPr(proof.text)) {
 						problems.push(`${id}: "${proof.text}" (${scene.name}, ${proof.param}) is not in ${where}: draw only the PR's own strings, or show the change on a card`);
 					}
+				}
+				// A value that flips says the default changed: only when the PR changes a default.
+				const diff = prDiff(pick.slug);
+				if (kind.changesDefault?.(scene.params ?? {}) && diff !== null && !changesADefault(diff)) {
+					problems.push(`${id}: the ${scene.name} scene changes the value (before → after), but #${pick.number} doesn't change a default: leave out "before" and "flipAt" (the setting is shown as it is)`);
 				}
 			}
 		}

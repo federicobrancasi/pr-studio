@@ -1,7 +1,7 @@
 // The changelog digest: its times (phrases of the narration, demo marks, steps) and the strip's height.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fitZoom, focusShows, iconsOf, inProof, loadSceneDocs, planFocus, proofCorpus, resolveTime, resolveTimes, steadyFrom, stripHeight } from '../cli/lib/digest.mjs';
+import { changesADefault, fitZoom, focusShows, iconsOf, inProof, loadSceneDocs, orderStrip, planFocus, proofCorpus, resolveTime, resolveTimes, steadyFrom, stripHeight } from '../cli/lib/digest.mjs';
 
 // A chapter that starts 10 s into the video: "Five. VS Code links can now add a plugin marketplace."
 const words = ['Five.', 'VS', 'Code', 'links', 'can', 'now', 'add', 'a', 'plugin', 'marketplace.']
@@ -142,6 +142,42 @@ test('a drawn setting has VS Code\'s own title, and no invented badge', async ()
 		params: ['title', 'badge'].filter(k => k in kit.setting.params),
 		proofs: kit.setting.proofs({ id: 'chat.copilot.ensemble.enabled', title: 'Fusion', description: 'When enabled, Auto is presented as Fusion' }).map(x => x.param),
 	}, { params: [], proofs: ['id', 'description'] });
+});
+
+test('a drawn setting changes its value only when the PR changes a default', async () => {
+	const kit = await loadSceneDocs();
+	const flips = p => kit.setting.changesDefault(p);
+	assert.deepStrictEqual({
+		flips: [flips({ before: false, after: true }), flips({ after: true }), flips({ before: true, after: true }), flips({ kind: 'text', before: 'a', after: 'b' })],
+		defaults: [
+			'+\t\tdefault: isImageGenerationEnabledByDefault(product.quality),',
+			'+      "default": true,',
+			'+\t\tdefault: return getAutoModeTierLabel(tier);',
+			'+\t\tdefault:',
+			'-\t\tdefault: false,',
+			' \t\tdefault: false,',
+		].map(changesADefault),
+	}, {
+		flips: [true, false, false, true],
+		// A setting's default added or changed counts; a switch's default case, a removed or unchanged line doesn't.
+		defaults: [true, true, false, false, false, false],
+	});
+});
+
+test('the strip comes in top to bottom: Before ahead of Now, even when the narration names it after', () => {
+	const times = spec => {
+		orderStrip(spec);
+		const r2 = x => Math.round(x * 100) / 100;
+		return { before: r2(spec.before.at), old: spec.before.rows.map(r => r2(r.at)), now: spec.now.rows.map(r => r2(r.at)), setting: spec.setting && r2(spec.setting.at) };
+	};
+	assert.deepStrictEqual([
+		// "Fusion, instead of Ensemble": Before's phrase (30 s) is after Now's (25 s); a row and the setting named early.
+		times({ before: { at: 30, rows: [{ id: 'old' }] }, now: { at: 25, rows: [{ id: 'new' }, { id: 'n2', at: 24 }] }, setting: { at: 20 } }),
+		times({ before: { at: 21, rows: [{ id: 'old' }] }, now: { at: 25, rows: [{ id: 'new' }] } }),
+	], [
+		{ before: 24.4, old: [24.55], now: [25, 25], setting: 25.2 },
+		{ before: 21, old: [21.15], now: [25], setting: undefined },
+	]);
 });
 
 test('a recording starts 1.2 s before its focus first shows the proof: how the demo got there is cut', () => {

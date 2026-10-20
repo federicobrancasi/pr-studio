@@ -67,13 +67,16 @@ change must be the PR's; example data around them (session titles, a file name) 
 | `app-badge` | the app icon in the dock with a badge (application badges, attention counts) | `badge`, `tile` |
 | `slash-menu` | a chat input with a slash command and its suggestions | `input`, `list`, `entry0`… |
 | `dialog` | a modal dialog (a confirmation, a warning) | `dialog`, `title`, `highlight`, `primary`, `cancel` |
-| `setting` | a setting whose default or value changes, or a new setting | `row`, `value`, `description` |
+| `setting` | a setting: a default the PR changes (`before` → `after`), a new setting, a new description | `row`, `value`, `description` |
 | `command-palette` | the Command Palette with a new or renamed command, or a new keybinding | `input`, `list`, `item0`… |
 | `notification` | a notification toast and its actions | `toast`, `message`, `action0`… |
 | `card` | a change with no UI to show: the change in words, its setting or command (no focus) | |
 
 A part exists only when its params draw it (a `tooltip` needs `tooltipAt`, a `child` needs `child.at`), and the
 arrow shows only while it is drawn.
+
+**A setting's value flips** (`before`, `flipAt`) only when the PR changes its default; otherwise leave them out and
+the setting is shown as it is (a renamed description doesn't tick its checkbox).
 
 **A card** (telemetry, a default applied behind the scenes, a behavior only a signed-in or managed session has, an
 internal rename): its title says the change for users, its lines the details, its setting or command in mono. Say
@@ -199,7 +202,8 @@ A chapter with a card:
 
 - **headline**: what changed for users, under 52 characters. **eyebrow** (optional): where it happens.
 - **before** (only a verified before) and **now**: `at` (when the head appears; for now, the phrase that states the
-  change), `rows`, and optionally `head`, `icon`, `tone`, `pulseAt`, `dim: false`. Rows: `id`, `text` (about 30
+  change), `rows`, and optionally `head`, `icon`, `tone`, `pulseAt`, `dim: false`. The strip comes in top to bottom:
+  when Before's phrase is spoken after Now's ("Fusion, instead of Ensemble"), Before comes in just ahead of Now. Rows: `id`, `text` (about 30
   characters; `sub` for a second line), `style` (`chip`: a dark button with `icon`, `"github"` for the GitHub mark;
   `button`: a blue button), `icon`, `mono` (code), `kbd` (a shortcut), `toggle` (`on`, `off`, `flip`), `tone`
   (`orange` for a warning), `changed: false` (a Now row that is not new), `at`. Now rows are green by default.
