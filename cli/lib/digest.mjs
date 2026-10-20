@@ -5,6 +5,7 @@
 //                                                  build VS Code from main when Insiders doesn't have them (auto)
 //   prs digest check [slug]                        what is missing or wrong (narration cues, marks, strip heights)
 //   prs digest stills [slug] --at 3,12.5           single frames + a contact sheet (fast)
+//   prs digest review [slug]                       a sheet per chapter of the moments to check, and the checklist
 //   prs digest render [slug]                       the whole video, delivered with its captions and a summary
 //   prs digest scenes                              the drawn scenes and their params
 //
@@ -1137,12 +1138,24 @@ function keyMoments(data) {
 	return times;
 }
 
-/** The moment to review each chapter at: 1 s into its first arrow (or its middle, with no arrow). */
+/**
+ * What to look at in each chapter: as it opens, each arrow as it starts and while it holds (or the middle, with no
+ * arrow), and as it ends; each with what should be on screen then.
+ */
 function reviewMoments(data) {
 	return data.segments.filter(s => s.kind === 'chapter').map(seg => {
-		const f = seg.focus?.[0];
-		const t = f ? Math.min(f.from + 1, f.until - 0.1) : (seg.start + seg.end) / 2;
-		return { id: seg.id, t: r3(Math.max(seg.start + 0.6, Math.min(seg.end - 0.2, t))) };
+		const moments = [{ t: seg.start + 0.8, what: 'it opens' }];
+		for (const [i, f] of (seg.focus ?? []).entries()) {
+			moments.push({ t: f.from + 0.3, what: `arrow ${i + 1}: "${f.row}" → ${f.name}` });
+			if (f.until - f.from > 1.4) {
+				moments.push({ t: (f.from + f.until) / 2 + 0.2, what: `arrow ${i + 1}, holding` });
+			}
+		}
+		if (!seg.focus?.length) {
+			moments.push({ t: (seg.start + seg.end) / 2, what: 'its middle (no arrow)' });
+		}
+		moments.push({ t: seg.end - 0.15, what: 'it ends' });
+		return { id: seg.id, moments: moments.map(m => ({ ...m, t: r3(Math.max(seg.start + 0.1, Math.min(seg.end - 0.05, m.t))) })) };
 	});
 }
 
@@ -1154,12 +1167,58 @@ export async function stillsDigest(slug, { at = null, workers = 3 } = {}) {
 	fs.mkdirSync(dir, { recursive: true });
 	const times = (at ?? keyMoments(data)).filter(t => t >= 0 && t <= data.total);
 	const shots = times.map((t, i) => ({ t, file: path.join(dir, `${String(i + 1).padStart(2, '0')}-${t.toFixed(2)}s.png`) }));
-	// One full-size still per chapter, for the review: each must be opened (the contact sheet is too small to judge).
-	const review = at ? [] : reviewMoments(data).map(m => ({ ...m, file: path.join(dir, `review-${m.id}.png`) }));
-	await capture(html, [...shots, ...review], 'png', workers);
+	await capture(html, shots, 'png', workers);
 	grid(findFfmpeg(), shots.map(s => s.file), path.join(dir, 'contact.png'));
-	return { dir, shots, review, total: data.total };
+	return { dir, shots, total: data.total };
 }
+
+/**
+ * prs digest review: one sheet per chapter (build/digest/review/<id>.png) of the moments to check, each frame as the
+ * video shows it with what should be on screen then and the words spoken; the frames are there full size too.
+ */
+export async function reviewDigest(slug, { workers = 3 } = {}) {
+	const { data } = await planDigest(slug);
+	const html = await buildPage(slug, data);
+	const dir = path.join(buildDir(slug), 'digest', 'review');
+	fs.rmSync(dir, { recursive: true, force: true });
+	fs.mkdirSync(dir, { recursive: true });
+	const chapters = reviewMoments(data).map(c => ({
+		...c, sheet: path.join(dir, `${c.id}.png`),
+		moments: c.moments.map((m, k) => ({ ...m, file: path.join(dir, `${c.id}-${k + 1}.jpg`) })),
+	}));
+	await capture(html, chapters.flatMap(c => c.moments), 'jpeg', workers);
+	const said = (id, t) => data.words.filter(w => w.seg === id && w.a <= t + 0.3 && w.b >= t - 1.6).map(w => w.display).join(' ');
+	const esc = x => String(x).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+	const browser = await launch();
+	try {
+		const page = await browser.newPage({ viewport: { width: 2 * 960 + 36, height: 600 }, deviceScaleFactor: 1 });
+		for (const c of chapters) {
+			const cells = c.moments.map(m => `<figure><img src="${pathToFileURL(m.file).href}"><figcaption><b>${m.t.toFixed(2)} s · ${esc(m.what)}</b>${said(c.id, m.t) ? ` · “${esc(said(c.id, m.t))}”` : ''}</figcaption></figure>`).join('');
+			// A file, not setContent: a page of its own may show the frames (file: URLs).
+			const sheetHtml = path.join(dir, `.${c.id}.html`);
+			fs.writeFileSync(sheetHtml, `<!doctype html><meta charset="utf-8"><style>body{margin:0;background:#e9ecf1;font:500 17px -apple-system,Segoe UI,sans-serif}main{display:grid;grid-template-columns:repeat(2,960px);gap:12px;padding:12px}figure{margin:0}img{width:960px;height:540px;display:block}figcaption{padding:6px 2px 2px;color:#333}</style><main>${cells}</main>`);
+			await page.goto(pathToFileURL(sheetHtml).href, { waitUntil: 'load' });
+			const broken = await page.evaluate(() => [...document.images].filter(i => !i.naturalWidth).length);
+			if (broken) {
+				throw new Error(`${broken} frame(s) of ${c.id} did not load for its review sheet`);
+			}
+			await page.screenshot({ path: c.sheet, fullPage: true });
+			fs.rmSync(sheetHtml, { force: true });
+		}
+	} finally {
+		await browser.close();
+	}
+	return { dir, chapters, total: data.total };
+}
+
+/** What a reviewer checks on each sheet. */
+export const REVIEW_CHECKLIST = [
+	'The UI on the right is the one the PR changes: a recording of it, a drawing of it, or a card when there is nothing to show; never another UI.',
+	'Each ring sits on exactly what its row names, while that is on screen: no ring on empty space, on another part, or on something not there yet.',
+	'What is said at each moment is what is on screen then.',
+	'Next to a recording, the strip says what the recording shows (the build recorded can word it differently than the PR).',
+	'Nothing is cut off or overlapping; the text is readable; the headline, the strip and the narration say the same thing.',
+];
 
 export async function renderDigest(slug, { workers = 3 } = {}) {
 	const { data, audio, tempo } = await planDigest(slug);
@@ -1278,11 +1337,21 @@ export async function digestCommand(args) {
 		case 'stills': {
 			const slug = digestSlug(args._[1]);
 			const at = typeof args.at === 'string' ? args.at.split(',').map(Number) : null;
-			const { dir, shots, review, total } = await stillsDigest(slug, { at, workers: Number(args.workers ?? 3) });
+			const { dir, shots, total } = await stillsDigest(slug, { at, workers: Number(args.workers ?? 3) });
 			console.log(`video ${total.toFixed(1)} s; stills: ${shots.map(s => path.basename(s.file)).join(', ')}`);
 			console.log(`contact sheet: ${path.relative(process.cwd(), path.join(dir, 'contact.png'))}`);
-			if (review.length) {
-				console.log(`review: open each, full size (guides/digest.md, "Review"): ${review.map(r => `${path.relative(process.cwd(), r.file)} (${r.t.toFixed(2)} s)`).join(', ')}`);
+			return 0;
+		}
+		case 'review': {
+			const slug = digestSlug(args._[1]);
+			const { chapters, total } = await reviewDigest(slug, { workers: Number(args.workers ?? 3) });
+			console.log(`video ${total.toFixed(1)} s. Open each sheet at full size (and a frame of it when something is small):`);
+			for (const c of chapters) {
+				console.log(`  ${path.relative(process.cwd(), c.sheet)}: ${c.moments.map(m => `${m.t.toFixed(2)} s ${m.what}`).join('; ')}`);
+			}
+			console.log('On each, check:');
+			for (const line of REVIEW_CHECKLIST) {
+				console.log(`  - ${line}`);
 			}
 			return 0;
 		}
@@ -1313,7 +1382,7 @@ export async function digestCommand(args) {
 			return 0;
 		}
 		default:
-			console.log('prs digest new [--run id | --file report.md] [--build auto|main|insiders] | check | stills [--at 1,2] | render | scenes');
+			console.log('prs digest new [--run id | --file report.md] [--build auto|main|insiders] | check | stills [--at 1,2] | review | render | scenes');
 			return sub ? 1 : 0;
 	}
 }
