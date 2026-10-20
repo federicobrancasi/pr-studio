@@ -4,13 +4,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ROOT, timed } from './lib/common.mjs';
 
-export const REPO_COMMANDS = new Set(['changelog', 'digest', 'demo', 'prompt', 'triage', 'budget', 'prefetch', 'summary', 'gallery']);
+export const REPO_COMMANDS = new Set(['changelog', 'digest', 'demo', 'build', 'prompt', 'triage', 'budget', 'prefetch', 'summary', 'gallery']);
 
 export const REPO_HELP = `  prs changelog [--run id | file]    the videos for the top 5 of today's #changelog (report from vscode-engineering)
   prs digest new [--run id | --file report.md]   one video for the top 5 of a #changelog report (guides/digest.md)
   prs digest check | stills [--at t,..] | render | scenes [slug]   check, look at, render it; the drawn scenes
   prs demo <id> [--slug s]           record demos/<id>.mjs in VS Code (PRS_VSCODE: the build; signed in on macOS)
   prs demo check                     whether VS Code starts here (demos work), in about 20 s
+  prs demo inspect <id> [--slug s]   the text on screen at the end of a recorded demo (what marks and proofs can use)
+  prs build [--at time | --commit sha]   VS Code built from main (at a time, default now) in pr-studio's cache: for
+                                     changes that no Insiders has yet; PRS_VSCODE takes the folder it prints
   prs prompt <PR>                    the prompt for a run nobody watches (a GitHub Actions job) to make that PR's video
   prs triage <PRs...> | --file f     which PRs get a video, which are faster to read (--cap n for a changelog)
   prs summary [triage.json]          the closing Slack message for a triage run
@@ -34,10 +37,25 @@ export async function repoCommand(cmd, args) {
 				process.exitCode = await demoCheck() ? 0 : 1;
 				return;
 			}
+			if (args._[0] === 'inspect') {
+				const { buildDir } = await import('./lib/common.mjs');
+				const id = args._[1];
+				const file = id && path.join(buildDir(digestSlug(args.slug)), 'demos', id, 'screen.txt');
+				if (!file || !fs.existsSync(file)) {
+					throw new Error('prs demo inspect <id> [--slug s]: the text on screen at the end of a recorded demo (run prs demo <id> first)');
+				}
+				console.log(fs.readFileSync(file, 'utf8'));
+				return;
+			}
 			if (!args._[0]) {
 				throw new Error('prs demo <id> [--slug changelog-<date>]: records videos/<slug>/demos/<id>.mjs');
 			}
 			await timed(null, 'demo', () => demo(digestSlug(args.slug), args._[0]));
+			return;
+		}
+		case 'build': {
+			const { buildFromSource } = await import('./lib/build.mjs');
+			await buildFromSource({ commit: typeof args.commit === 'string' ? args.commit : null, at: typeof args.at === 'string' ? args.at : null });
 			return;
 		}
 		case 'changelog': {

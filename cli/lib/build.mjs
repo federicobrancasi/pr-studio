@@ -1,0 +1,85 @@
+// prs build: a VS Code build that has a day's changes, for the demos to record.
+//
+// Most days VS Code Insiders has a #changelog report's picks. In a release week Insiders is built from the release
+// branch, and changes merged to main are in no build: then the demos record VS Code built from main at the report's
+// time, cloned and built here, in pr-studio's cache (never in a checkout of yours). PRS_VSCODE takes the folder.
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawn } from 'node:child_process';
+import { api } from './github.mjs';
+
+const REPO = 'microsoft/vscode';
+const CACHE = path.join(os.homedir(), '.cache', 'pr-studio', 'builds');
+
+/** Where VS Code built from a commit lives: a checkout of it, built, with its own Electron. */
+export function sourceBuildDir(commit) {
+	return path.join(CACHE, `vscode-${commit.slice(0, 9)}`);
+}
+
+/** The last commit on microsoft/vscode main at a time (ISO 8601). */
+export async function mainAt(time) {
+	const commits = await api(`repos/${REPO}/commits?sha=main&until=${encodeURIComponent(time)}&per_page=1`);
+	if (!commits?.[0]?.sha) {
+		throw new Error(`No commit on ${REPO} main before ${time}`);
+	}
+	return { sha: commits[0].sha, date: commits[0].commit.committer.date, message: commits[0].commit.message.split('\n')[0] };
+}
+
+function run(command, args, { cwd, log }) {
+	return new Promise((resolve, reject) => {
+		fs.appendFileSync(log, `\n$ ${command} ${args.join(' ')}\n`);
+		const out = fs.openSync(log, 'a');
+		const child = spawn(command, args, { cwd, stdio: ['ignore', out, out], env: { ...process.env, CI: process.env.CI ?? '' } });
+		child.on('error', reject);
+		child.on('close', code => {
+			fs.closeSync(out);
+			if (code === 0) {
+				resolve();
+			} else {
+				const tail = fs.readFileSync(log, 'utf8').split('\n').slice(-30).join('\n');
+				reject(new Error(`${command} ${args.join(' ')} failed (${code}). The end of ${log}:\n${tail}`));
+			}
+		});
+	});
+}
+
+/**
+ * Builds VS Code at a commit of main (default: main at `at`, or now) and returns its folder. A build that is done is
+ * reused. Takes a while the first time: the checkout, npm ci, the client, extensions and Copilot (build-fast), then
+ * Electron and the built-in extensions (preLaunch).
+ */
+export async function buildFromSource({ commit = null, at = null, log = console.log } = {}) {
+	const target = commit ? { sha: commit, date: null, message: '' } : await mainAt(at ?? new Date().toISOString());
+	if (!/^[0-9a-f]{40}$/.test(target.sha)) {
+		throw new Error(`A commit is its full 40-character SHA: ${target.sha}`);
+	}
+	const dir = sourceBuildDir(target.sha);
+	const done = path.join(dir, '.prs-build.json');
+	if (fs.existsSync(done)) {
+		log(`VS Code ${target.sha.slice(0, 9)} is built: ${dir}`);
+		return dir;
+	}
+	fs.mkdirSync(dir, { recursive: true });
+	const logFile = path.join(dir, '.prs-build.log');
+	const step = async (label, command, args) => {
+		const t0 = Date.now();
+		log(`${label}...`);
+		await run(command, args, { cwd: dir, log: logFile });
+		log(`  ${label}: ${((Date.now() - t0) / 60000).toFixed(1)} min`);
+	};
+	log(`Building VS Code ${target.sha.slice(0, 9)}${target.message ? ` (${target.message})` : ''} in ${dir} (log: ${logFile})`);
+	if (!fs.existsSync(path.join(dir, '.git'))) {
+		await step('checkout', 'git', ['init', '-q']);
+		await run('git', ['remote', 'add', 'origin', `https://github.com/${REPO}.git`], { cwd: dir, log: logFile });
+	}
+	await step('fetch', 'git', ['fetch', '-q', '--depth', '1', 'origin', target.sha]);
+	await run('git', ['checkout', '-q', '--force', 'FETCH_HEAD'], { cwd: dir, log: logFile });
+	await step('npm ci', 'npm', ['ci']);
+	await step('build (client, extensions, Copilot)', 'npm', ['run', 'build-fast']);
+	await step('Electron and the built-in extensions', 'node', ['build/lib/preLaunch.ts']);
+	const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
+	fs.writeFileSync(done, JSON.stringify({ commit: target.sha, committedAt: target.date, version: pkg.version, builtAt: new Date().toISOString() }, null, '\t'));
+	log(`VS Code ${pkg.version} (${target.sha.slice(0, 9)}) is built: set PRS_VSCODE=${dir}`);
+	return dir;
+}

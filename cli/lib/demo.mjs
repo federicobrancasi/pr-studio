@@ -5,44 +5,90 @@
 // The demo script (an ES module):
 //   export const files = { 'README.md': '# My project\n' };   // the workspace (optional)
 //   export const settings = { 'editor.minimap.enabled': false };  // user settings (optional)
-//   export async function setup({ page, run, ... }) { ... }   // before recording starts (optional)
-//   export default async function demo({ page, run, mark, step, moveTo, click, type, press, sleep, openUrl }) { ... }
+//   export async function setup(ctx) { ... }   // before recording starts (optional): may openAgentsWindow()
+//   export default async function demo(ctx) { ... }   // recorded
+// ctx: page, run, palette, picker, pickerItem, setting, openUrl, terminal, chat.send/reply, moveTo, click, type,
+// press, sleep, scheme, workspace, openAgentsWindow (in setup: the recording is then of the Agents window), and in the
+// recorded part mark and step.
 // mark(name, locator, { text }) logs that element's box and the times it is shown (with { text }: only while that text
 // shows in it):
 // marks are followed for the whole recording, so give each one a locator that matches only its UI (filter by its
 // text); step(label) logs a moment worth a still.
 //
-// The build: PRS_VSCODE (the executable: code-insiders on Linux), or on macOS /Applications/Visual Studio Code -
-// Insiders.app. Signed out on Linux (CI: no keychain); on macOS always signed in, with a copy of the signed-in Insiders
-// profile and the login keychain (a signed-out window there asks for the keychain and starts without the account).
-// Writes videos/<slug>/build/demos/<id>/: frames/ (30 fps, 2560x1440), demo.json, clip.mp4, contact.png.
+// The build: PRS_VSCODE (the executable: code-insiders on Linux; or VS Code built from source by prs build), or on
+// macOS /Applications/Visual Studio Code - Insiders.app. Signed out on Linux (CI: no keychain); on macOS always signed
+// in, with a copy of the signed-in profile of the same build (Insiders, or Code OSS for a source build) and the login
+// keychain (a signed-out window there asks for the keychain and starts without the account).
+// Writes videos/<slug>/build/demos/<id>/: frames/ (30 fps, 2560x1440), demo.json, clip.mp4, contact.png, screen.txt
+// (the text on screen at the end).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { _electron } from 'playwright-core';
-import { buildDir, findFfmpeg, isOffline, videoDir, writeJson } from './common.mjs';
+import { buildDir, findFfmpeg, isOffline, readJson, videoDir, writeJson } from './common.mjs';
 import { launch } from './browser.mjs';
 import { trackBoxAt } from '../../digest/track.js';
 
 const SIZE = { width: 1280, height: 720 };
 const FPS = 30;
 const MAC_INSIDERS = '/Applications/Visual Studio Code - Insiders.app/Contents/MacOS/Code - Insiders';
-const MAC_STATE = path.join(os.homedir(), 'Library/Application Support/Code - Insiders/User/globalStorage/state.vscdb');
 
 export const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 export function vscodePath() {
 	const p = process.env.PRS_VSCODE || (process.platform === 'darwin' ? MAC_INSIDERS : null);
 	if (!p || !fs.existsSync(p)) {
-		throw new Error(`No VS Code build: set PRS_VSCODE to its executable (${p ? `${p} does not exist` : 'code-insiders on Linux'})`);
+		throw new Error(`No VS Code build: set PRS_VSCODE to its executable, or to VS Code built from source (prs build) (${p ? `${p} does not exist` : 'code-insiders on Linux'})`);
 	}
 	return p;
 }
 
+/** VS Code built from source (prs build): a checkout with its product.json and its own Electron. */
+export function isSourceBuild(p) {
+	return fs.existsSync(path.join(p, 'product.json')) && fs.existsSync(path.join(p, '.build', 'electron'));
+}
+
+/**
+ * How to start a build: its executable, the arguments before VS Code's own, its environment, and the signed-in state
+ * a demo copies on a Mac: the profile of the same build (its keychain entry decrypts it). Code OSS: ~/.vscode-oss-dev.
+ */
+function launchSpec(p) {
+	const support = name => path.join(os.homedir(), 'Library/Application Support', name, 'User/globalStorage/state.vscdb');
+	if (isSourceBuild(p)) {
+		const product = readJson(path.join(p, 'product.json'));
+		const exe = process.platform === 'darwin'
+			? path.join(p, '.build', 'electron', `${product.nameLong}.app`, 'Contents', 'MacOS', product.nameShort)
+			: path.join(p, '.build', 'electron', product.applicationName);
+		return {
+			exe, args: [p, '--disable-extension=vscode.vscode-api-tests'],
+			env: { NODE_ENV: 'development', VSCODE_DEV: '1', VSCODE_CLI: '1' },
+			profile: 'Code OSS', state: path.join(os.homedir(), '.vscode-oss-dev', 'User/globalStorage/state.vscdb'),
+		};
+	}
+	const { quality } = buildInfo(p);
+	const profile = quality === 'insider' ? 'Code - Insiders' : quality === 'exploration' ? 'Code - Exploration' : 'Code';
+	return { exe: p, args: [], env: {}, profile, state: support(profile) };
+}
+
 /** The build's version and commit, from its product.json and package.json. */
 export function buildInfo(exe = vscodePath()) {
+	if (isSourceBuild(exe)) {
+		const product = readJson(path.join(exe, 'product.json'));
+		const pkg = readJson(path.join(exe, 'package.json'));
+		const done = path.join(exe, '.prs-build.json');
+		const meta = fs.existsSync(done) ? readJson(done) : {};
+		let commit = meta.commit ?? null;
+		if (!commit) {
+			try {
+				commit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: exe, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+			} catch {
+				commit = null;
+			}
+		}
+		return { name: 'VS Code', quality: 'main', version: pkg.version ?? null, commit, scheme: product.urlProtocol ?? null, committedAt: meta.committedAt ?? null };
+	}
 	const roots = process.platform === 'darwin'
 		? [path.join(exe, '../../Resources/app')]
 		: [path.join(path.dirname(exe), 'resources/app'), path.join(path.dirname(exe), '../resources/app')];
@@ -50,10 +96,10 @@ export function buildInfo(exe = vscodePath()) {
 		if (fs.existsSync(path.join(root, 'product.json'))) {
 			const product = JSON.parse(fs.readFileSync(path.join(root, 'product.json'), 'utf8'));
 			const pkg = fs.existsSync(path.join(root, 'package.json')) ? JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')) : {};
-			return { name: product.nameLong ?? product.nameShort, quality: product.quality, version: pkg.version ?? null, commit: product.commit ?? null };
+			return { name: product.nameLong ?? product.nameShort, quality: product.quality, version: pkg.version ?? null, commit: product.commit ?? null, scheme: product.urlProtocol ?? null };
 		}
 	}
-	return { name: 'VS Code', quality: null, version: null, commit: null };
+	return { name: 'VS Code', quality: null, version: null, commit: null, scheme: null };
 }
 
 /** An X server for Linux runs without a display (CI): Xvfb on a free display number. */
@@ -257,7 +303,8 @@ function ignoreLaunchNoise() {
 }
 
 export async function openVSCode({ files = {}, settings = {}, signedIn = process.platform === 'darwin', log = console.log, failureShot = null } = {}) {
-	const exe = vscodePath();
+	const spec = launchSpec(vscodePath());
+	const exe = spec.exe;
 	const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'prs-demo-'));
 	let app, xserver;
 	const cleanup = () => {
@@ -280,18 +327,20 @@ export async function openVSCode({ files = {}, settings = {}, signedIn = process
 		const workspace = path.join(tmp, 'my-project');
 		fs.mkdirSync(path.join(data, 'User/globalStorage'), { recursive: true });
 		fs.mkdirSync(home, { recursive: true });
-		const env = { ...process.env, HOME: home };
+		const env = { ...process.env, ...spec.env, HOME: home };
 		if (process.platform === 'darwin') {
 			// Its own HOME, with the login keychain linked in: without it macOS asks for a keychain.
 			fs.mkdirSync(path.join(home, 'Library'), { recursive: true });
 			fs.symlinkSync(path.join(os.homedir(), 'Library/Keychains'), path.join(home, 'Library/Keychains'));
 		}
 		if (signedIn) {
-			if (process.platform !== 'darwin' || !fs.existsSync(MAC_STATE)) {
-				throw new Error('--signed-in needs a signed-in VS Code Insiders profile on this Mac');
+			// Signed in: a copy of the signed-in state of the same build's own profile (its keychain entry decrypts it).
+			const state = spec.state;
+			if (process.platform !== 'darwin' || !fs.existsSync(state)) {
+				throw new Error(`A signed-in demo needs a signed-in ${spec.profile} profile on this Mac (${state})`);
 			}
 			const copy = path.join(data, 'User/globalStorage/state.vscdb');
-			execFileSync('sqlite3', [MAC_STATE, `.backup "${copy}"`]);
+			execFileSync('sqlite3', [state, `.backup "${copy}"`]);
 			// A clean demo: none of the recent folders or recently used commands.
 			execFileSync('sqlite3', [copy, 'DELETE FROM ItemTable WHERE key IN (\'history.recentlyOpenedPathsList\', \'commandPalette.mru.cache\', \'commandPalette.mru.counter\')']);
 		}
@@ -316,6 +365,7 @@ export async function openVSCode({ files = {}, settings = {}, signedIn = process
 		}
 		fs.mkdirSync(workspace, { recursive: true });
 		const args = [
+			...spec.args,
 			`--user-data-dir=${data}`, `--extensions-dir=${path.join(tmp, 'extensions')}`,
 			'--skip-release-notes', '--skip-welcome', '--disable-telemetry', '--disable-experiments', '--no-cached-data',
 			'--disable-updates', '--disable-workspace-trust', '--new-window', workspace,
@@ -351,9 +401,22 @@ export async function openVSCode({ files = {}, settings = {}, signedIn = process
 			w.setContentSize(s.width, s.height);
 		}, SIZE);
 		await page.waitForSelector('.monaco-workbench', { timeout: LAUNCH_TIMEOUT });
-		log(`VS Code up (${signedIn ? 'signed in: a copy of the local profile' : 'signed out'})`);
+		if (signedIn) {
+			const verdict = await checkSession(page, spec);
+			if (verdict === 'invalid') {
+				// The profile's GitHub session no longer works (signed in long ago, or revoked): Copilot asks to sign in, in
+				// a modal that would cover the recording. Start again signed out (sign in once in that app to fix it).
+				log(`The ${spec.profile} profile's GitHub session is invalid (Copilot asks to sign in): recording signed out. Sign in once in ${spec.profile} to record signed in.`);
+				await app.close().catch(() => { });
+				cleanup();
+				process.off('SIGINT', onSignal);
+				process.off('SIGTERM', onSignal);
+				return openVSCode({ files, settings, signedIn: false, log, failureShot });
+			}
+		}
+		log(`VS Code up (${signedIn ? `signed in: a copy of the ${spec.profile} profile` : 'signed out'})`);
 		return {
-			app, page, workspace,
+			app, page, workspace, signedIn,
 			async close() {
 				await app.close().catch(() => { });
 				cleanup();
@@ -367,6 +430,39 @@ export async function openVSCode({ files = {}, settings = {}, signedIn = process
 		process.off('SIGTERM', onSignal);
 		throw error;
 	}
+}
+
+/**
+ * Whether a copied profile's GitHub session still works: 'valid', or 'invalid' when Copilot asks to sign in again (a
+ * modal) or says the token is invalid. Remembered per profile until its state changes (a sign-in) or for a day.
+ */
+async function checkSession(page, spec) {
+	const cacheFile = path.join(os.homedir(), '.cache', 'pr-studio', 'sessions.json');
+	const cache = fs.existsSync(cacheFile) ? readJson(cacheFile) : {};
+	const mtime = fs.statSync(spec.state).mtimeMs;
+	const known = cache[spec.state];
+	if (known && (known.verdict === 'invalid' ? known.mtime === mtime : Date.now() - known.at < 24 * 3600 * 1000)) {
+		if (known.verdict === 'invalid') {
+			return 'invalid';
+		}
+		return 'valid';
+	}
+	const signs = [page.getByText('Sign in to use GitHub Copilot'), page.getByText(/GitHub token is invalid/)];
+	let verdict = 'valid';
+	for (let i = 0; i < 24 && verdict === 'valid'; i++) {
+		for (const sign of signs) {
+			if (await sign.first().isVisible().catch(() => false)) {
+				verdict = 'invalid';
+			}
+		}
+		if (verdict === 'valid') {
+			await sleep(500);
+		}
+	}
+	cache[spec.state] = { verdict, mtime, at: Date.now() };
+	fs.mkdirSync(path.dirname(cacheFile), { recursive: true });
+	fs.writeFileSync(cacheFile, JSON.stringify(cache, null, '\t'));
+	return verdict;
 }
 
 /** VS Code started, but renders with the wrong fonts (Linux): a recording would look broken. */
@@ -434,7 +530,7 @@ async function showCursor(page) {
 	});
 }
 
-/** The helpers a demo script gets. */
+/** The helpers a demo script gets, for one window. */
 function helpers(page, app) {
 	const moveTo = async (locator, steps = 28) => {
 		const box = await locator.boundingBox({ timeout: 10_000 });
@@ -443,28 +539,55 @@ function helpers(page, app) {
 		}
 		await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps });
 	};
-	const run = async (command, { delay = 18 } = {}) => {
+	const click = async (locator, { pause = 300 } = {}) => {
+		await moveTo(locator);
+		await sleep(pause);
+		const box = await locator.boundingBox();
+		await page.mouse.down();
+		await page.mouse.up();
+		return box;
+	};
+	const palette = async (text, { delay = 18 } = {}) => {
 		await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Shift+P' : 'Control+Shift+P');
-		await page.locator('.quick-input-widget').waitFor({ state: 'visible', timeout: 10_000 });
+		const widget = page.locator('.quick-input-widget');
+		await widget.waitFor({ state: 'visible', timeout: 10_000 });
 		await sleep(250);
-		await page.keyboard.type(command, { delay });
+		await page.keyboard.type(text, { delay });
 		await sleep(450);
+		return widget;
+	};
+	const run = async (command, options) => {
+		await palette(command, options);
 		await page.keyboard.press('Enter');
 	};
+	/** The chat input of this window: the Chat view's, a session's in the Agents window, or its new-session input. */
+	const chatInput = () => page.locator('.interactive-input-part .monaco-editor, .chat-input-container .monaco-editor, .new-chat-input-area .monaco-editor').filter({ visible: true }).last();
 	return {
 		page, app, sleep,
 		moveTo,
 		/** Moves the mouse to it, then clicks (a real click, as a user would). */
-		async click(locator, { pause = 300 } = {}) {
-			await moveTo(locator);
-			await sleep(pause);
-			const box = await locator.boundingBox();
-			await page.mouse.down();
-			await page.mouse.up();
-			return box;
-		},
+		click,
 		/** Runs a command from the Command Palette, typed as a user would. */
 		run,
+		/** Opens the Command Palette and types, without Enter: returns the picker (the commands it lists). */
+		palette,
+		/** The picker open in this window (the Command Palette, or the quick pick a command opened), and a row of it. */
+		picker: () => page.locator('.quick-input-widget').filter({ visible: true }),
+		pickerItem: label => page.locator('.quick-input-widget .monaco-list-row').filter({ visible: true }).filter({ hasText: label }).first(),
+		/**
+		 * Opens the Settings editor on one setting (searched by its ID) and returns its row, found by its ID (data-key):
+		 * never by its wording, which the build may say differently than the PR.
+		 */
+		async setting(id) {
+			await run('Preferences: Open Settings (UI)');
+			const editor = page.locator('.settings-editor');
+			await editor.waitFor({ state: 'visible', timeout: 15_000 });
+			await sleep(600);
+			await page.keyboard.type(id, { delay: 25 });
+			const row = editor.locator(`.setting-item-contents[data-key="${id}"]`).first();
+			await row.waitFor({ state: 'visible', timeout: 15_000 });
+			return row;
+		},
 		/** Opens a vscode:// (or vscode-insiders://) link inside this window (Developer: Open URL), pasted. */
 		async openUrl(url) {
 			await run('Developer: Open URL');
@@ -472,6 +595,45 @@ function helpers(page, app) {
 			await page.keyboard.insertText(url);
 			await sleep(700);
 			await page.keyboard.press('Enter');
+		},
+		/** Opens a new terminal and runs a command in it (typed); returns the terminal's text area (for a mark). */
+		async terminal(command, { delay = 35 } = {}) {
+			await run('Terminal: Create New Terminal');
+			const rows = page.locator('.terminal-wrapper.active .xterm-rows, .terminal-wrapper .xterm-rows').filter({ visible: true }).last();
+			await rows.waitFor({ state: 'visible', timeout: 20_000 });
+			await sleep(1500);
+			if (command) {
+				await page.keyboard.type(command, { delay });
+				await page.keyboard.press('Enter');
+			}
+			return rows;
+		},
+		/** Copilot chat in this window: send a prompt, wait for the reply. */
+		chat: {
+			input: chatInput,
+			async send(text, { delay = 15 } = {}) {
+				const input = chatInput();
+				await input.waitFor({ state: 'visible', timeout: 20_000 });
+				await click(input);
+				await sleep(300);
+				await page.keyboard.type(text, { delay });
+				await sleep(300);
+				await page.keyboard.press('Enter');
+			},
+			/** Waits until the reply is done: a Send button again, and no Cancel or Stop. */
+			async reply({ timeout = 180_000 } = {}) {
+				const start = Date.now();
+				await sleep(2500);
+				while (Date.now() - start < timeout) {
+					const busy = await page.locator('a.action-label[aria-label^="Cancel"], a.action-label[aria-label^="Stop"]').filter({ visible: true }).count();
+					const send = await page.locator('a.action-label[aria-label^="Send"]').filter({ visible: true }).count();
+					if (!busy && send) {
+						return;
+					}
+					await sleep(1000);
+				}
+				throw new Error(`The chat's reply did not finish in ${timeout / 1000} s`);
+			},
 		},
 		async type(text, { delay = 45 } = {}) {
 			await page.keyboard.type(text, { delay });
@@ -482,6 +644,39 @@ function helpers(page, app) {
 		/** The product's own URL scheme: vscode-insiders for Insiders. */
 		scheme: null,
 	};
+}
+
+/**
+ * The text on screen in a window, one line per shown element that holds text (or an icon button's label), top to
+ * bottom: what a mark's { text } and a chapter's proof can be. Written to screen.txt after each demo.
+ */
+async function screenText(page) {
+	return page.evaluate(() => {
+		const lines = [], seen = new Set();
+		for (const el of document.querySelectorAll('body *')) {
+			if (el.closest('#prs-cursor')) {
+				continue;
+			}
+			const own = [...el.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join(' ').replace(/\s+/g, ' ').trim();
+			const label = !own && (el.matches('a.action-label, .codicon, button') || el.getAttribute('role') === 'button') ? el.getAttribute('aria-label') ?? '' : '';
+			const text = own || label;
+			if (!text || !el.checkVisibility?.({ opacityProperty: true, visibilityProperty: true })) {
+				continue;
+			}
+			const r = el.getBoundingClientRect();
+			if (r.width < 2 || r.height < 2 || r.bottom < 0 || r.right < 0 || r.top > innerHeight || r.left > innerWidth) {
+				continue;
+			}
+			const key = `${text}|${Math.round(r.x)}|${Math.round(r.y)}`;
+			if (seen.has(key)) {
+				continue;
+			}
+			seen.add(key);
+			const cls = [...el.classList].slice(0, 3).join('.');
+			lines.push({ y: r.y, x: r.x, line: `${label ? `[${text}]` : text}    <${el.tagName.toLowerCase()}${cls ? `.${cls}` : ''}> ${Math.round(r.x)},${Math.round(r.y)} ${Math.round(r.width)}x${Math.round(r.height)}` });
+		}
+		return lines.sort((a, b) => a.y - b.y || a.x - b.x).map(l => l.line).slice(0, 600).join('\n');
+	});
 }
 
 /** Every repaint of the window as a JPEG at device resolution, with its time; stop() returns the frames. */
@@ -763,22 +958,51 @@ export async function demo(slug, id, { signedIn = process.platform === 'darwin' 
 		throw error;
 	}
 	const { page, app } = vscode;
-	// Everything the demo types: a proof the demo typed itself (a search for the setting) proves nothing.
+	// Everything the demo types (in any window): a proof the demo typed itself (a search for the setting) proves nothing.
 	const typed = [];
-	for (const fn of ['type', 'insertText']) {
-		const original = page.keyboard[fn].bind(page.keyboard);
-		page.keyboard[fn] = (text, ...rest) => {
-			typed.push(String(text));
-			return original(text, ...rest);
-		};
-	}
-	const ctx = helpers(page, app);
-	ctx.scheme = build.quality === 'insider' ? 'vscode-insiders' : 'vscode';
-	ctx.workspace = vscode.workspace;
+	const hookTyping = p => {
+		for (const fn of ['type', 'insertText']) {
+			const original = p.keyboard[fn].bind(p.keyboard);
+			p.keyboard[fn] = (text, ...rest) => {
+				typed.push(String(text));
+				return original(text, ...rest);
+			};
+		}
+	};
+	hookTyping(page);
+	const scheme = build.scheme ?? (build.quality === 'insider' ? 'vscode-insiders' : 'vscode');
+	// The window the demo works in, and records: the main window, or the Agents window once setup() opens it.
+	const win = { page, recording: false };
+	const openAgentsWindow = async () => {
+		if (win.recording) {
+			throw new Error('Open the Agents window in setup(), before the recording starts: the recording is of one window');
+		}
+		const opened = app.waitForEvent('window', { timeout: 30_000 });
+		const main = helpers(page, app);
+		await main.palette('Open Agents Window');
+		const found = await page.locator('.quick-input-widget .monaco-list-row').filter({ visible: true }).filter({ hasText: /Agents Window|Open in Agents/ }).count();
+		if (!found) {
+			await page.keyboard.press('Escape');
+			throw new Error('This build has no "Open Agents Window" command');
+		}
+		await page.keyboard.press('Enter');
+		const agents = await opened;
+		await agents.waitForSelector('.monaco-workbench', { timeout: 60_000 });
+		await app.evaluate(({ BrowserWindow }, s) => {
+			const w = BrowserWindow.getAllWindows().reduce((a, b) => (a.id > b.id ? a : b));
+			w.setPosition(40, 40);
+			w.setContentSize(s.width, s.height);
+		}, SIZE);
+		await sleep(3000);
+		hookTyping(agents);
+		win.page = agents;
+		return { ...helpers(agents, app), scheme, workspace: vscode.workspace };
+	};
+	const ctxFor = () => ({ ...helpers(win.page, app), scheme, workspace: vscode.workspace, openAgentsWindow });
 	let recording = null, tracker = null, fonts = null;
 	const steps = [];
 	try {
-		if (!signedIn) {
+		if (!vscode.signedIn) {
 			await skipOnboarding(page);
 		}
 		fonts = await renderedFonts(page);
@@ -789,21 +1013,24 @@ export async function demo(slug, id, { signedIn = process.platform === 'darwin' 
 			throw error;
 		}
 		if (typeof mod.setup === 'function') {
-			await mod.setup({ ...ctx, mark: () => { }, step: () => { } });
+			await mod.setup({ ...ctxFor(), mark: () => { }, step: () => { } });
 		}
-		await showCursor(page);
-		await page.mouse.move(SIZE.width * 0.62, SIZE.height * 0.42);
-		const viewport = await page.evaluate(() => [innerWidth, innerHeight]);
-		recording = await screencast(page, raw);
-		tracker = markTracker(page);
+		const rec = win.page;
+		win.recording = true;
+		await showCursor(rec);
+		await rec.mouse.move(SIZE.width * 0.62, SIZE.height * 0.42);
+		const viewport = await rec.evaluate(() => [innerWidth, innerHeight]);
+		recording = await screencast(rec, raw);
+		tracker = markTracker(rec);
 		await sleep(400);
 		const start = recording.frames[0]?.t ?? Date.now() / 1000;
 		await mod.default({
-			...ctx,
+			...ctxFor(),
 			mark: (name, locator, options) => tracker.mark(name, locator, options),
 			step: label => steps.push({ label: String(label), t: +(Date.now() / 1000 - start).toFixed(2) }),
 		});
 		await sleep(600);
+		fs.writeFileSync(path.join(out, 'screen.txt'), await screenText(rec).catch(() => ''));
 		const marks = await tracker.stop();
 		tracker = null;
 		const frames = await recording.stop();
@@ -824,7 +1051,7 @@ export async function demo(slug, id, { signedIn = process.platform === 'darwin' 
 		fs.rmSync(raw, { recursive: true, force: true });
 		const info = {
 			id, fps: FPS, count, duration: +(count / FPS).toFixed(2), size: [SIZE.width, SIZE.height], scale: 2,
-			build, signedIn, fonts, recorded: new Date().toISOString(),
+			build, signedIn: vscode.signedIn, fonts, recorded: new Date().toISOString(),
 			steps: steps.map(s => ({ ...s, t: Math.max(0, +(s.t - (first - start)).toFixed(2)) })),
 			viewport, typed: typed.filter(x => x.length > 1),
 			marks: summarizeMarks(marks, first, count / FPS, viewport),
@@ -838,11 +1065,12 @@ export async function demo(slug, id, { signedIn = process.platform === 'darwin' 
 		for (const s of info.steps) {
 			log(`  step ${s.t} s: ${s.label}`);
 		}
-		log(`look at ${path.relative(process.cwd(), path.join(out, 'contact.png'))} (and clip.mp4)`);
+		log(`look at ${path.relative(process.cwd(), path.join(out, 'contact.png'))} (and clip.mp4); the text on screen at the end: ${path.relative(process.cwd(), path.join(out, 'screen.txt'))}`);
 		return info;
 	} catch (error) {
-		await page.screenshot({ path: path.join(out, 'failure.png') }).catch(() => { });
-		throw new Error(`${error.message.split('\n')[0]} (the window at that moment: ${path.join(out, 'failure.png')})`);
+		await win.page.screenshot({ path: path.join(out, 'failure.png') }).catch(() => { });
+		fs.writeFileSync(path.join(out, 'screen.txt'), await screenText(win.page).catch(() => ''));
+		throw new Error(`${error.message.split('\n')[0]} (the window at that moment: ${path.join(out, 'failure.png')}; the text on it: ${path.join(out, 'screen.txt')})`);
 	} finally {
 		await tracker?.stop().catch(() => { });
 		await recording?.stop().catch(() => { });
