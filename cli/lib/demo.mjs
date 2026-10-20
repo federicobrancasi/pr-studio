@@ -18,9 +18,9 @@
 // recording keeps the narration's pace and plays as recorded. The narration starts where the recording starts, or at
 // begin(); cue.end() waits until it ends, and the clip ends there (or where the script does).
 //
-// The build: PRS_VSCODE (the executable: code-insiders on Linux; or VS Code built from source by prs build), or the
-// project's (picks.json: VS Code built from main by prs digest new), or on macOS /Applications/Visual Studio Code -
-// Insiders.app. Signed out on Linux (CI: no keychain); on macOS always signed
+// The build: the project's when prs digest new built VS Code from main for it (picks.json), or PRS_VSCODE (the
+// executable: code-insiders on Linux; or VS Code built from source by prs build), or on macOS
+// /Applications/Visual Studio Code - Insiders.app. Signed out on Linux (CI: no keychain); on macOS always signed
 // in, with a copy of the signed-in profile of the same build (Insiders, or Code OSS for a source build) and the login
 // keychain (a signed-out window there asks for the keychain and starts without the account).
 // Writes videos/<slug>/build/demos/<id>/: frames/ (30 fps, 2560x1440), demo.json, clip.mp4, contact.png, screen.txt
@@ -957,9 +957,9 @@ export async function demo(slug, id, { signedIn = process.platform === 'darwin' 
 	fs.mkdirSync(raw, { recursive: true });
 	const t0 = Date.now();
 	const log = (...a) => console.log(`[demo ${id} ${((Date.now() - t0) / 1000).toFixed(0)}s]`, ...a);
-	// The project's build (prs digest new built VS Code from main for it), unless PRS_VSCODE names one.
+	// The project's build when prs digest new built VS Code from main for it (its picks aren't in PRS_VSCODE's).
 	const picksFile = path.join(videoDir(slug), 'picks.json');
-	const own = !process.env.PRS_VSCODE && fs.existsSync(picksFile) ? readJson(picksFile).build?.path : null;
+	const own = fs.existsSync(picksFile) ? readJson(picksFile).build?.path : null;
 	if (own) {
 		if (!fs.existsSync(own)) {
 			throw new Error(`This project's build is gone (${own}): run prs build --commit ${readJson(picksFile).build.commit}, or set PRS_VSCODE`);

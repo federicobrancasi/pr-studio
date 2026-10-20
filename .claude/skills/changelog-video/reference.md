@@ -19,9 +19,9 @@ Each PR is downloaded in its own `videos/<owner>-<repo>-<number>/` (`brief.md`, 
 Output: `build/demos/<id>/` (each recording: `demo.json`, `clip.mp4`, `contact.png`, `screen.txt`) and
 `build/digest/` (`timeline.json`, `review/`, the video).
 
-**The build.** Demos record VS Code Insiders; when Insiders doesn't have the picks (a release week: Insiders comes
-from the release branch), `prs digest new` builds VS Code from main as of the last pick (a few minutes, or one built
-before), and `prs demo` uses it. `brief.md` says which.
+**The build.** Demos record VS Code Insiders (`PRS_VSCODE`); when Insiders doesn't have the picks (a release week:
+Insiders comes from the release branch), `prs digest new` builds VS Code from main as of the last pick (a few minutes,
+or one built before; about 8 GB in `PRS_BUILDS`), and `prs demo` uses it. `brief.md` says which.
 
 **Signed in or not.** On a Mac, `prs demo` copies the signed-in profile of the same build (Insiders, or Code OSS for a
 build from main) and prints whether the session works. In CI, and with a profile whose session expired, it runs

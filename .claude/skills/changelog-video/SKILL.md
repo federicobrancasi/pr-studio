@@ -21,8 +21,11 @@ the helpers: [reference.md](reference.md).
 For each chapter, in this order:
 
 1. **Record it** (a demo): VS Code doing the change, driven like a user. This is what the video is for. Most changes
-   can be recorded: settings, the Command Palette, quick picks, menus, hovers, dialogs, `vscode://` links, editors,
-   terminals, views; when `prs demo` runs signed in, also chat and the Agents window.
+   can be recorded: the Command Palette, quick picks, menus, hovers, dialogs, `vscode://` links, editors, terminals,
+   views, settings; when `prs demo` runs signed in, also chat and the Agents window. Record the change itself: the
+   command running, the menu open, the dialog up, the text pasted, the new button clicked. A Settings row is the
+   change only when the change is the setting (a new setting, a new default, a new description); for a feature that
+   has a setting, record the feature, and let the setting card (`setting` in digest.json) name the setting.
 2. **Draw it** (a scene) when it can't be recorded here: it needs a sign-in the build doesn't have, another OS, an
    enterprise policy, the network, Stable.
 3. **A card** only when there is no UI to show (telemetry, a default applied behind the scenes, an internal change).
@@ -111,10 +114,12 @@ click" }]`, `"proof": "New Nested Session"`.
 each arrow as it starts and while it holds, and as it ends, each frame with what should be on screen and the words
 spoken then. It prints the checklist.
 
-Have the sheets checked by a fresh pair of eyes: when you can start a subagent, give it the sheet paths, the
-checklist and `facts.md`, and ask it to list every frame where something is wrong (it hasn't seen your work: it
-judges what is on screen). Otherwise open each sheet yourself at full size. Fix, run `prs digest check` and
-`prs digest review` again; two rounds at most, then render.
+**Every sheet is checked, by a fresh pair of eyes.** Start a subagent for it (the task tool): give it the five
+sheet paths, the checklist and `facts.md`, and ask it to open every sheet and list each frame where something is
+wrong. It hasn't seen your work, so it judges what is on screen, and it costs little: don't skip it to save credits.
+Only when your run can't start one, open all five sheets yourself, at full size. Fix what it finds, run
+`prs digest check` and `prs digest review` again, and have the new sheets checked: two rounds at most, then render.
+Write in `notes.md` what each round found.
 
 On a sheet, a frame is wrong when:
 
@@ -136,6 +141,8 @@ The daily job (GitHub Actions, or a local stand-in): nobody reads your messages 
   all (`prs demo check`), don't retry.
 - **Leave pr-studio as it is:** no commits, no changes to the CLI, the player, the scenes or the skills. If something
   in them is broken, say so in `notes.md`.
+- **Write files with your file-editing tool**, not `sed -i`, heredocs or shell redirects: a run nobody watches can
+  deny those.
 - **No internet** in CI (`PRS_OFFLINE`): the report, every PR and the build were downloaded before you started.
 - End with three lines: the video's path and length, which chapters are recordings (and in which window), and what
   the review found.

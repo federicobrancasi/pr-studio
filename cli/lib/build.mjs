@@ -2,7 +2,8 @@
 //
 // Most days VS Code Insiders has a #changelog report's picks. In a release week Insiders is built from the release
 // branch, and changes merged to main are in no build: then the demos record VS Code built from main at the report's
-// time, cloned and built here, in pr-studio's cache (never in a checkout of yours). PRS_VSCODE takes the folder.
+// time, cloned and built here, in pr-studio's cache (PRS_BUILDS; never in a checkout of yours). PRS_VSCODE takes
+// the folder.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -10,7 +11,8 @@ import { spawn } from 'node:child_process';
 import { api } from './github.mjs';
 
 const REPO = 'microsoft/vscode';
-const CACHE = path.join(os.homedir(), '.cache', 'pr-studio', 'builds');
+// About 8 GB a build (its node_modules, the built-in extensions'): PRS_BUILDS puts them on a roomier disk.
+const CACHE = process.env.PRS_BUILDS || path.join(os.homedir(), '.cache', 'pr-studio', 'builds');
 
 /** Where VS Code built from a commit lives: a checkout of it, built, with its own Electron. */
 export function sourceBuildDir(commit) {

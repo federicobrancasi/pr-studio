@@ -124,7 +124,7 @@ export async function newDigest({ run = null, file = null, build: buildMode = 'a
 	// In a release week Insiders is built from the release branch: the picks merged to main are in no build. Then the
 	// demos record VS Code built from main as of the last pick (prs build), and the project remembers that build.
 	const missing = entries.filter(e => e.inBuild === false).length;
-	if (buildMode === 'main' || (buildMode === 'auto' && missing && !process.env.PRS_VSCODE)) {
+	if (buildMode === 'main' || (buildMode === 'auto' && missing)) {
 		const last = entries.map(e => e.mergedAt).filter(Boolean).sort().at(-1);
 		try {
 			const { buildFromSource, cachedBuilds } = await import('./build.mjs');
@@ -1063,7 +1063,8 @@ async function buildPage(slug, data) {
 	fs.writeFileSync(entry, [
 		`import createPlayer from ${JSON.stringify(path.join(ROOT, 'digest', 'player.js'))};`,
 		'const player = createPlayer(document.getElementById(\'app\'), window.DATA);',
-		'window.seek = async t => player.seek(t);',
+		// Seeked, then two frames painted: a screenshot taken mid-paint can show a stale piece of the page.
+		'window.seek = async t => { await player.seek(t); await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))); };',
 		'window.chunks = () => player.chunks();',
 		// Every font loads before the first frame: a part measured before its font is in is too narrow.
 		'window.ready = async () => { await Promise.all([...document.fonts].map(f => f.load().catch(() => null))); await document.fonts.ready; return [...document.fonts].filter(f => f.status === \'loaded\').map(f => `${f.family} ${f.weight}`); };',
