@@ -1030,6 +1030,14 @@ export async function checkDigest(slug) {
 			problems.push(`${id}: visual must be { "demo": id } or { "scene": { name, params } }`);
 		}
 	}
+	// Record first: a drawn chapter is one whose UI couldn't run here, not one nobody tried to record.
+	const untried = ids.filter(id => {
+		const v = digest.chapters?.[id]?.visual;
+		return v?.scene && v.scene.name !== 'card' && !fs.existsSync(path.join(dir, 'demos', `${id}.mjs`));
+	});
+	if (untried.length) {
+		notes.push(`drawn with no recording tried: ${untried.join(', ')} (record first when the UI can run here, with prs demo; otherwise notes.md says why it can't)`);
+	}
 	if (fs.existsSync(path.join(bdir, 'timeline.json'))) {
 		try {
 			const { data } = await planDigest(slug);

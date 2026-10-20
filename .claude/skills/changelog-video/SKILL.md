@@ -32,8 +32,11 @@ For each chapter, in this order:
    A change that has UI is drawn, never a card, even when no scene is exactly that UI: take the closest one (a
    control whose label changes is a `button-swap`, a dropdown a `picker`, a row's buttons `list-actions`).
 
-Try a recording before you give up on it: when a locator doesn't match, `prs demo inspect <id>` shows the text on
-screen. When the same recording fails twice the same way, draw the chapter and write why in `notes.md`.
+Try a recording of every chapter whose UI can run here, before you give up on it: when a locator doesn't match,
+`prs demo inspect <id>` shows the text on screen. When the same recording fails twice the same way, draw the chapter.
+For each chapter that isn't recorded, `notes.md` says why it can't be (`prs digest check` lists the drawn ones with no
+recording tried). Never skip a recording or the review to save time or credits: they are what the video is for, and a
+run is expected to take 20-40 minutes and a few hundred credits.
 
 ## The steps
 
